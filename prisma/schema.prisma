@@ -1,0 +1,293 @@
+// Atlas of Thought — Prisma schema
+// Phase 0: auth + BYOK key storage.
+// Domain models (Map/Country/City/...) declared here from day 1 to lock in
+// the data model — N:N City<->Conversation in particular avoids a Phase 4
+// breaking change when we introduce topic-segment splitting.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================================
+// Auth.js (NextAuth v5) tables
+// ============================================================================
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts Account[]
+  sessions Session[]
+  apiKeys  ApiKey[]
+  maps     Map[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ============================================================================
+// BYOK — encrypted Anthropic API keys
+// ============================================================================
+
+model ApiKey {
+  id          String   @id @default(cuid())
+  userId      String
+  provider    String   @default("anthropic")
+  // AES-256-GCM ciphertext encoded as: base64(iv) "." base64(ciphertext) "." base64(authTag)
+  ciphertext  String   @db.Text
+  // Last 4 chars of the plaintext key, for display ("sk-...abcd")
+  hint        String
+  label       String?
+  createdAt   DateTime @default(now())
+  lastUsedAt  DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+}
+
+// ============================================================================
+// Atlas domain — declared early to avoid breaking changes later
+// ============================================================================
+
+enum Visibility {
+  private
+  unlisted
+  public
+}
+
+enum CityRank {
+  capital
+  city
+  town
+}
+
+enum RoadType {
+  highway
+  regular
+  trail
+  ferry
+}
+
+enum TerrainType {
+  mountain
+  forest
+  river
+  sea_border
+}
+
+enum SourceType {
+  chatgpt
+  claude
+  claude_code
+  cursor
+  manual
+  native
+}
+
+enum ArtifactKind {
+  code
+  document
+  image
+  diagram
+}
+
+enum LandmarkType {
+  library
+  museum
+  monument
+  workshop
+}
+
+model Map {
+  id         String     @id @default(cuid())
+  userId     String
+  title      String     @default("My Atlas")
+  visibility Visibility @default(private)
+  shareSlug  String?    @unique
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  countries Country[]
+  cities    City[]
+  roads     Road[]
+  terrain   TerrainFeature[]
+  conversations Conversation[]
+}
+
+model Country {
+  id        String   @id @default(cuid())
+  mapId     String
+  name      String   // Latin-style
+  nameJa    String?
+  theme     String?
+  color     String   @default("#c9b88a")
+  // Polygon stored as JSON array of [x, y] pairs
+  polygon   Json?
+  createdAt DateTime @default(now())
+
+  map    Map    @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  cities City[]
+}
+
+model City {
+  id            String     @id @default(cuid())
+  mapId         String
+  countryId     String
+  rank          CityRank   @default(town)
+  label         String
+  labelJa       String?
+  summary       String?    @db.Text
+  positionX     Float
+  positionY     Float
+  urbanDensity  Int        @default(1)
+  visibility    Visibility @default(private)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  map           Map               @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  country       Country           @relation(fields: [countryId], references: [id], onDelete: Cascade)
+  conversations CityConversation[]
+  artifacts     Artifact[]
+  roadsFrom     Road[]            @relation("RoadFrom")
+  roadsTo       Road[]            @relation("RoadTo")
+}
+
+model Conversation {
+  id              String      @id @default(cuid())
+  mapId           String
+  source          SourceType
+  externalId      String?     // upstream id (chatgpt conv id etc.) for dedupe
+  title           String?
+  topicEmbedding  Bytes?      // pgvector via raw SQL until pgvector-prisma in Phase 4
+  createdAtSource DateTime?
+  importedAt      DateTime    @default(now())
+
+  map      Map                @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  messages Message[]
+  cities   CityConversation[]
+
+  @@unique([mapId, source, externalId])
+}
+
+// N:N City <-> Conversation. From day 1, so Phase 4 topic-splitting doesn't
+// require a schema change. In Phase 2 we'll insert exactly one row per
+// conversation; in Phase 4 we may split a conversation across multiple cities.
+model CityConversation {
+  cityId         String
+  conversationId String
+  // Message-range slice. In Phase 2, segmentStart=0 and segmentEnd=-1 mean
+  // "the entire conversation belongs to this city". In Phase 4 we split a
+  // conversation across multiple cities by topic segment.
+  segmentStart   Int      @default(0)
+  segmentEnd     Int      @default(-1)
+  createdAt      DateTime @default(now())
+
+  city         City         @relation(fields: [cityId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@id([cityId, conversationId, segmentStart, segmentEnd])
+}
+
+model Message {
+  id              String   @id @default(cuid())
+  conversationId  String
+  // 0-based ordinal within the conversation
+  ordinal         Int
+  role            String   // user | assistant | system | tool
+  text            String   @db.Text
+  // Phase 4: topic-segment id for in-conversation splitting. Null in Phase 2.
+  topicSegmentId  String?
+  createdAt       DateTime?
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, ordinal])
+  @@index([topicSegmentId])
+}
+
+model Road {
+  id        String   @id @default(cuid())
+  mapId     String
+  fromId    String
+  toId      String
+  type      RoadType @default(regular)
+  label     String?
+  rationale String?  @db.Text
+  createdAt DateTime @default(now())
+
+  map  Map  @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  from City @relation("RoadFrom", fields: [fromId], references: [id], onDelete: Cascade)
+  to   City @relation("RoadTo",   fields: [toId],   references: [id], onDelete: Cascade)
+
+  @@index([mapId])
+}
+
+model TerrainFeature {
+  id              String      @id @default(cuid())
+  mapId           String
+  type            TerrainType
+  // GeoJSON-like geometry: { kind: "polygon"|"polyline", coords: [[x,y],...] }
+  geometry        Json
+  betweenCountryA String?
+  betweenCountryB String?
+  createdAt       DateTime    @default(now())
+
+  map Map @relation(fields: [mapId], references: [id], onDelete: Cascade)
+}
+
+model Artifact {
+  id            String       @id @default(cuid())
+  cityId        String
+  kind          ArtifactKind
+  landmarkType  LandmarkType
+  title         String
+  content       String       @db.Text
+  createdAt     DateTime     @default(now())
+
+  city City @relation(fields: [cityId], references: [id], onDelete: Cascade)
+}

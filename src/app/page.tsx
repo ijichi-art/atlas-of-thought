@@ -1,65 +1,77 @@
-import Image from "next/image";
+import Link from "next/link";
+import { auth, signIn, signOut } from "@/auth";
 
-export default function Home() {
+export default async function Home() {
+  const session = await auth();
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+    <main className="min-h-screen bg-stone-50 text-stone-800">
+      <div className="max-w-3xl mx-auto px-8 py-16">
+        <header className="flex items-center justify-between mb-16">
+          <h1 className="text-2xl font-serif">Atlas of Thought</h1>
+          {session?.user ? (
+            <div className="flex items-center gap-4 text-sm">
+              <span className="text-stone-500">{session.user.email ?? session.user.name}</span>
+              <form
+                action={async () => {
+                  "use server";
+                  await signOut({ redirectTo: "/" });
+                }}
+              >
+                <button type="submit" className="underline text-stone-600 hover:text-stone-900">
+                  Sign out
+                </button>
+              </form>
+            </div>
+          ) : (
+            <form
+              action={async () => {
+                "use server";
+                await signIn("github", { redirectTo: "/" });
+              }}
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+              <button
+                type="submit"
+                className="text-sm py-1.5 px-3 bg-stone-800 text-white rounded hover:bg-stone-700"
+              >
+                Sign in
+              </button>
+            </form>
+          )}
+        </header>
+
+        <section className="mb-12">
+          <p className="text-lg leading-relaxed text-stone-700 max-w-prose">
+            Turn your AI conversations into a living map. Import past chats from
+            ChatGPT, Claude, or Claude Code, and watch them grow into countries,
+            cities, and roads — terrain you can explore.
           </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+          <p className="mt-3 text-xs text-stone-400">Phase 0 — foundations</p>
+        </section>
+
+        {session?.user ? (
+          <section className="space-y-4">
+            <h2 className="text-sm uppercase tracking-wider text-stone-500">Get started</h2>
+            <ul className="space-y-2 text-stone-700">
+              <li>
+                <Link href="/settings" className="underline hover:text-stone-900">
+                  → Add your Anthropic API key (BYOK)
+                </Link>
+              </li>
+              <li className="text-stone-400">
+                → Import past conversations <em>(Phase 2)</em>
+              </li>
+              <li className="text-stone-400">
+                → Open your map <em>(Phase 1)</em>
+              </li>
+            </ul>
+          </section>
+        ) : (
+          <section className="text-stone-500 text-sm">
+            Sign in to start charting your thinking.
+          </section>
+        )}
+      </div>
+    </main>
   );
 }

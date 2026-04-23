@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: atlas-postgres
+    environment:
+      POSTGRES_USER: atlas
+      POSTGRES_PASSWORD: atlas
+      POSTGRES_DB: atlas
+    ports:
+      - "5432:5432"
+    volumes:
+      - atlas-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U atlas"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  atlas-pg-data:
