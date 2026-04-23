@@ -11,8 +11,7 @@
       "theme": "Vision, motivation, why this exists",
       "color": "#f4ead8",
       "polygon": [
-        [180, 350], [220, 200], [300, 120], [460, 90], [650, 85],
-        [820, 100], [820, 400], [180, 400]
+        [820, 500], [551, 231], [652, 93], [820, 80], [988, 93], [1020, 154]
       ]
     },
     {
@@ -22,29 +21,7 @@
       "theme": "Tech stack, data model, system design",
       "color": "#e8e4d4",
       "polygon": [
-        [820, 100], [1000, 90], [1180, 100], [1340, 130], [1450, 180],
-        [1490, 280], [1500, 400], [820, 400]
-      ]
-    },
-    {
-      "id": "visualizatio",
-      "name": "Visualizatio",
-      "nameJa": "可視化国",
-      "theme": "Terrain rendering, the map itself",
-      "color": "#dde6d4",
-      "polygon": [
-        [180, 400], [1500, 400], [1490, 620], [170, 620]
-      ]
-    },
-    {
-      "id": "importatio",
-      "name": "Importatio",
-      "nameJa": "取込国",
-      "theme": "Parsers for ChatGPT, Claude, Claude Code logs",
-      "color": "#f0e4dc",
-      "polygon": [
-        [170, 620], [820, 620], [820, 920], [650, 915], [440, 905],
-        [250, 880], [180, 800], [160, 700]
+        [820, 500], [1020, 154], [1103, 217], [1170, 355], [1240, 500], [1208, 661]
       ]
     },
     {
@@ -54,30 +31,145 @@
       "theme": "OSS launch, BYOK design, sharing",
       "color": "#e4dde8",
       "polygon": [
-        [820, 620], [1490, 620], [1480, 720], [1430, 820], [1330, 880],
-        [1180, 905], [1000, 915], [820, 920]
+        [820, 500], [1208, 661], [1089, 769], [988, 907], [820, 920]
+      ]
+    },
+    {
+      "id": "importatio",
+      "name": "Importatio",
+      "nameJa": "取込国",
+      "theme": "Parsers for ChatGPT, Claude, Claude Code logs",
+      "color": "#f0e4dc",
+      "polygon": [
+        [820, 500], [820, 920], [652, 907], [523, 797], [469, 645]
+      ]
+    },
+    {
+      "id": "visualizatio",
+      "name": "Visualizatio",
+      "nameJa": "可視化国",
+      "theme": "Terrain rendering, the map itself",
+      "color": "#dde6d4",
+      "polygon": [
+        [820, 500], [469, 645], [420, 500], [432, 339], [551, 231]
       ]
     }
   ],
   "mountainRanges": [
     {
-      "id": "mtn-imag-arch",
+      "id": "mtn-conceptus",
       "label": "Mons Conceptus",
-      "betweenCountries": ["imaginatio", "architectura"],
-      "spine": [[820, 180], [820, 240], [820, 300], [820, 360]]
+      "betweenCountries": ["imaginatio", "visualizatio"],
+      "spine": [[720, 380], [680, 330], [640, 290], [600, 250]]
     },
     {
-      "id": "mtn-imp-comm",
+      "id": "mtn-pelagi",
       "label": "Mons Pelagi",
       "betweenCountries": ["importatio", "communitas"],
-      "spine": [[820, 680], [820, 750], [820, 820], [820, 880]]
+      "spine": [[810, 600], [840, 690], [810, 770], [855, 850]]
     }
   ],
   "rivers": [
     {
-      "id": "river-axis",
-      "label": "Flumen Axis",
-      "path": [[180, 510], [500, 505], [820, 510], [1140, 505], [1490, 510]]
+      "id": "river-vena",
+      "label": "Flumen Vena",
+      "path": [[800, 80], [770, 170], [720, 250], [660, 320], [590, 400], [520, 460], [450, 500]]
+    }
+  ],
+  "cities": [
+    { "id": "imag-cap", "countryId": "imaginatio",   "rank": "capital", "label": "Why-We-Build",  "labelJa": "なぜ作るか",   "position": [780, 380], "urbanDensity": 6 },
+    { "id": "imag-c1",  "countryId": "imaginatio",   "rank": "city",    "label": "Differentiation",                          "position": [730, 220], "urbanDensity": 4 },
+    { "id": "imag-t1",  "countryId": "imaginatio",   "rank": "town",    "label": "Terrain metaphor",                         "position": [920, 110], "urbanDensity": 1 },
+
+    { "id": "arch-cap", "countryId": "architectura", "rank": "capital", "label": "Stack",         "labelJa": "技術選定",     "position": [1100, 430], "urbanDensity": 9 },
+    { "id": "arch-c1",  "countryId": "architectura", "rank": "city",    "label": "Prisma 7 schema",                          "position": [1080, 230], "urbanDensity": 5 },
+    { "id": "arch-c2",  "countryId": "architectura", "rank": "city",    "label": "Auth.js v5",                               "position": [1190, 540], "urbanDensity": 4 },
+    { "id": "arch-t1",  "countryId": "architectura", "rank": "town",    "label": "BYOK encryption",                          "position": [930, 480], "urbanDensity": 2 },
+
+    { "id": "comm-cap", "countryId": "communitas",   "rank": "capital", "label": "OSS launch",    "labelJa": "公開",        "position": [1010, 760], "urbanDensity": 6 },
+    { "id": "comm-c1",  "countryId": "communitas",   "rank": "city",    "label": "Show HN",                                  "position": [930, 880],  "urbanDensity": 3 },
+    { "id": "comm-t1",  "countryId": "communitas",   "rank": "town",    "label": "MIT licensing",                            "position": [905, 600],  "urbanDensity": 1 },
+
+    { "id": "imp-cap",  "countryId": "importatio",   "rank": "capital", "label": "Import",        "labelJa": "取込",        "position": [660, 800],  "urbanDensity": 5 },
+    { "id": "imp-t1",   "countryId": "importatio",   "rank": "town",    "label": "ChatGPT parser",                           "position": [520, 720],  "urbanDensity": 2 },
+
+    { "id": "vis-cap",  "countryId": "visualizatio", "rank": "capital", "label": "Atlas engine",  "labelJa": "地形エンジン", "position": [540, 470], "urbanDensity": 8 },
+    { "id": "vis-c1",   "countryId": "visualizatio", "rank": "city",    "label": "Pan / zoom",                               "position": [710, 490], "urbanDensity": 4 },
+    { "id": "vis-c2",   "countryId": "visualizatio", "rank": "city",    "label": "Force layout",                             "position": [495, 320], "urbanDensity": 3 },
+    { "id": "vis-t1",   "countryId": "visualizatio", "rank": "town",    "label": "Compass rose",                             "position": [445, 460], "urbanDensity": 1 }
+  ],
+  "roads": [
+    {
+      "id": "hwy-imag-arch", "fromCityId": "imag-cap", "toCityId": "arch-cap",
+      "type": "highway", "label": "why → how",
+      "waypoints": [[920, 360], [1020, 410]]
+    },
+    {
+      "id": "hwy-arch-comm", "fromCityId": "arch-cap", "toCityId": "comm-cap",
+      "type": "highway",
+      "waypoints": [[1170, 580], [1090, 700]]
+    },
+    {
+      "id": "hwy-comm-imp", "fromCityId": "comm-cap", "toCityId": "imp-cap",
+      "type": "highway",
+      "waypoints": [[860, 830], [760, 800]]
+    },
+    {
+      "id": "hwy-imp-vis", "fromCityId": "imp-cap", "toCityId": "vis-cap",
+      "type": "highway",
+      "waypoints": [[610, 700], [550, 580]]
+    },
+    {
+      "id": "hwy-vis-imag", "fromCityId": "vis-cap", "toCityId": "imag-cap",
+      "type": "highway",
+      "waypoints": [[640, 410], [720, 380]]
+    },
+
+    {
+      "id": "hwy-cross-w-e", "fromCityId": "vis-cap", "toCityId": "arch-c2",
+      "type": "highway", "label": "central artery",
+      "waypoints": [[700, 500], [870, 510], [1040, 530]]
+    },
+    {
+      "id": "hwy-cross-nw-se", "fromCityId": "imag-cap", "toCityId": "comm-cap",
+      "type": "highway",
+      "waypoints": [[850, 510], [930, 620], [990, 700]]
+    },
+    {
+      "id": "hwy-cross-arch-imp", "fromCityId": "arch-t1", "toCityId": "imp-cap",
+      "type": "highway",
+      "waypoints": [[850, 580], [780, 670], [720, 760]]
+    },
+
+    { "id": "rd-imag-c1",  "fromCityId": "imag-cap", "toCityId": "imag-c1",  "type": "regular", "waypoints": [[770, 290]] },
+    { "id": "rd-imag-t1",  "fromCityId": "imag-c1",  "toCityId": "imag-t1",  "type": "regular", "waypoints": [[820, 170]] },
+
+    { "id": "rd-arch-c1",  "fromCityId": "arch-cap", "toCityId": "arch-c1",  "type": "regular", "waypoints": [[1130, 320]] },
+    { "id": "rd-arch-c2",  "fromCityId": "arch-cap", "toCityId": "arch-c2",  "type": "regular" },
+    { "id": "rd-arch-t1",  "fromCityId": "arch-cap", "toCityId": "arch-t1",  "type": "regular", "waypoints": [[1010, 460]] },
+    { "id": "rd-arch-link","fromCityId": "arch-c1",  "toCityId": "arch-c2",  "type": "regular", "waypoints": [[1180, 400]] },
+
+    { "id": "rd-vis-c1",   "fromCityId": "vis-cap",  "toCityId": "vis-c1",   "type": "regular", "waypoints": [[620, 480]] },
+    { "id": "rd-vis-c2",   "fromCityId": "vis-cap",  "toCityId": "vis-c2",   "type": "regular", "waypoints": [[510, 400]] },
+    { "id": "rd-vis-t1",   "fromCityId": "vis-cap",  "toCityId": "vis-t1",   "type": "regular" },
+
+    { "id": "rd-imp-t1",   "fromCityId": "imp-cap",  "toCityId": "imp-t1",   "type": "regular", "waypoints": [[590, 760]] },
+
+    { "id": "rd-comm-c1",  "fromCityId": "comm-cap", "toCityId": "comm-c1",  "type": "regular", "waypoints": [[960, 820]] },
+    { "id": "rd-comm-t1",  "fromCityId": "comm-cap", "toCityId": "comm-t1",  "type": "regular", "waypoints": [[975, 680]] },
+
+    { "id": "rd-cross-arch-vis", "fromCityId": "arch-t1", "toCityId": "vis-c1", "type": "regular", "waypoints": [[820, 490]] },
+    { "id": "rd-cross-comm-imp", "fromCityId": "comm-t1", "toCityId": "imp-cap", "type": "regular", "waypoints": [[800, 700]] },
+
+    {
+      "id": "trail-conceptus", "fromCityId": "imag-c1", "toCityId": "vis-c2",
+      "type": "trail", "label": "across Mons Conceptus",
+      "waypoints": [[680, 250], [650, 290], [610, 320], [560, 320]]
+    },
+    {
+      "id": "trail-pelagi", "fromCityId": "imp-cap", "toCityId": "comm-c1",
+      "type": "trail", "label": "across Mons Pelagi",
+      "waypoints": [[760, 800], [820, 830], [860, 870], [900, 880]]
     }
   ]
 }
