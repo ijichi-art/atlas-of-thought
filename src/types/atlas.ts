@@ -46,6 +46,11 @@ export type RoadData = {
   waypoints?: Point[];
 };
 
+export type MockMessage = {
+  role: "user" | "assistant";
+  text: string;
+};
+
 export type CityData = {
   id: string;
   countryId: string;
@@ -55,6 +60,11 @@ export type CityData = {
   position: Point;
   // 0 = no buildings, 10 = dense cluster
   urbanDensity: number;
+  // Optional one-paragraph summary of what this city represents.
+  summary?: string;
+  // Optional mock conversation preview shown in the detail panel.
+  // In Phase 4 this will come from imported data; for the demo we hard-code.
+  messages?: MockMessage[];
 };
 
 export type SampleMap = {
