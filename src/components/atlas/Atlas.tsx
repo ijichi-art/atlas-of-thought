@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { select } from "d3-selection";
 import { zoom, zoomIdentity, type ZoomBehavior } from "d3-zoom";
 import type { SampleMap } from "@/types/atlas";
@@ -10,6 +10,9 @@ import { Country } from "./Country";
 import { River } from "./River";
 import { MountainRange } from "./MountainRange";
 import { Compass } from "./Compass";
+import { City } from "./City";
+import { Road } from "./Road";
+import { Legend } from "./Legend";
 
 const MIN_SCALE = 0.4;
 const MAX_SCALE = 6;
@@ -19,6 +22,8 @@ export function Atlas({ map }: { map: SampleMap }) {
   const contentRef = useRef<SVGGElement | null>(null);
   const zoomRef = useRef<ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const [scale, setScale] = useState(1);
+  const [selectedCityId, setSelectedCityId] = useState<string | null>(null);
+  const cityById = useMemo(() => new Map(map.cities.map((c) => [c.id, c])), [map.cities]);
 
   useEffect(() => {
     const svg = svgRef.current;
@@ -57,6 +62,7 @@ export function Atlas({ map }: { map: SampleMap }) {
         viewBox={`0 0 ${width} ${height}`}
         preserveAspectRatio="xMidYMid meet"
         className="w-full h-full cursor-grab active:cursor-grabbing block"
+        onClick={() => setSelectedCityId(null)}
       >
         <AtlasDefs />
         <g ref={contentRef}>
@@ -70,6 +76,17 @@ export function Atlas({ map }: { map: SampleMap }) {
           ))}
           {map.mountainRanges.map((m) => (
             <MountainRange key={m.id} data={m} />
+          ))}
+          {map.roads.map((r) => (
+            <Road key={r.id} data={r} cityById={cityById} />
+          ))}
+          {map.cities.map((c) => (
+            <City
+              key={c.id}
+              data={c}
+              selected={selectedCityId === c.id}
+              onSelect={setSelectedCityId}
+            />
           ))}
         </g>
       </svg>
@@ -101,7 +118,11 @@ export function Atlas({ map }: { map: SampleMap }) {
         </button>
       </div>
 
-      <div className="absolute bottom-1 left-3 text-[10px] text-stone-500 font-mono select-none">
+      <div className="absolute bottom-3 left-3">
+        <Legend />
+      </div>
+
+      <div className="absolute bottom-1 left-1/2 -translate-x-1/2 text-[10px] text-stone-500 font-mono select-none">
         {Math.round(scale * 100)}% · scroll to zoom · drag to pan
       </div>
     </div>

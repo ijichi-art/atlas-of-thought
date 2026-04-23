@@ -31,6 +31,32 @@ export type RiverData = {
   path: Point[];
 };
 
+export type CityRank = "capital" | "city" | "town";
+
+export type RoadType = "highway" | "regular" | "trail" | "ferry";
+
+export type RoadData = {
+  id: string;
+  fromCityId: string;
+  toCityId: string;
+  type: RoadType;
+  label?: string;
+  // Optional intermediate path points; if present, the road renders as a
+  // smooth curve (Catmull-Rom) through fromCity → waypoints → toCity.
+  waypoints?: Point[];
+};
+
+export type CityData = {
+  id: string;
+  countryId: string;
+  rank: CityRank;
+  label: string;
+  labelJa?: string;
+  position: Point;
+  // 0 = no buildings, 10 = dense cluster
+  urbanDensity: number;
+};
+
 export type SampleMap = {
   id: string;
   title: string;
@@ -39,4 +65,6 @@ export type SampleMap = {
   countries: CountryData[];
   mountainRanges: MountainRangeData[];
   rivers: RiverData[];
+  cities: CityData[];
+  roads: RoadData[];
 };
