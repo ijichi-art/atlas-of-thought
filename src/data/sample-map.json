@@ -1,0 +1,83 @@
+{
+  "id": "demo",
+  "title": "Atlas of Thought — design atlas (meta demo)",
+  "viewBox": { "width": 1600, "height": 1000 },
+  "sea": { "color": "#aaccdd" },
+  "countries": [
+    {
+      "id": "imaginatio",
+      "name": "Imaginatio",
+      "nameJa": "構想国",
+      "theme": "Vision, motivation, why this exists",
+      "color": "#f4ead8",
+      "polygon": [
+        [180, 350], [220, 200], [300, 120], [460, 90], [650, 85],
+        [820, 100], [820, 400], [180, 400]
+      ]
+    },
+    {
+      "id": "architectura",
+      "name": "Architectura",
+      "nameJa": "設計国",
+      "theme": "Tech stack, data model, system design",
+      "color": "#e8e4d4",
+      "polygon": [
+        [820, 100], [1000, 90], [1180, 100], [1340, 130], [1450, 180],
+        [1490, 280], [1500, 400], [820, 400]
+      ]
+    },
+    {
+      "id": "visualizatio",
+      "name": "Visualizatio",
+      "nameJa": "可視化国",
+      "theme": "Terrain rendering, the map itself",
+      "color": "#dde6d4",
+      "polygon": [
+        [180, 400], [1500, 400], [1490, 620], [170, 620]
+      ]
+    },
+    {
+      "id": "importatio",
+      "name": "Importatio",
+      "nameJa": "取込国",
+      "theme": "Parsers for ChatGPT, Claude, Claude Code logs",
+      "color": "#f0e4dc",
+      "polygon": [
+        [170, 620], [820, 620], [820, 920], [650, 915], [440, 905],
+        [250, 880], [180, 800], [160, 700]
+      ]
+    },
+    {
+      "id": "communitas",
+      "name": "Communitas",
+      "nameJa": "公開国",
+      "theme": "OSS launch, BYOK design, sharing",
+      "color": "#e4dde8",
+      "polygon": [
+        [820, 620], [1490, 620], [1480, 720], [1430, 820], [1330, 880],
+        [1180, 905], [1000, 915], [820, 920]
+      ]
+    }
+  ],
+  "mountainRanges": [
+    {
+      "id": "mtn-imag-arch",
+      "label": "Mons Conceptus",
+      "betweenCountries": ["imaginatio", "architectura"],
+      "spine": [[820, 180], [820, 240], [820, 300], [820, 360]]
+    },
+    {
+      "id": "mtn-imp-comm",
+      "label": "Mons Pelagi",
+      "betweenCountries": ["importatio", "communitas"],
+      "spine": [[820, 680], [820, 750], [820, 820], [820, 880]]
+    }
+  ],
+  "rivers": [
+    {
+      "id": "river-axis",
+      "label": "Flumen Axis",
+      "path": [[180, 510], [500, 505], [820, 510], [1140, 505], [1490, 510]]
+    }
+  ]
+}

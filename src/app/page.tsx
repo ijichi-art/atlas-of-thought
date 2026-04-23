@@ -61,14 +61,22 @@ export default async function Home() {
               <li className="text-stone-400">
                 → Import past conversations <em>(Phase 2)</em>
               </li>
-              <li className="text-stone-400">
-                → Open your map <em>(Phase 1)</em>
+              <li>
+                <Link href="/atlas" className="underline hover:text-stone-900">
+                  → View the demo atlas <em className="text-stone-400">(static, Phase 1 PR-1)</em>
+                </Link>
               </li>
             </ul>
           </section>
         ) : (
-          <section className="text-stone-500 text-sm">
-            Sign in to start charting your thinking.
+          <section className="space-y-3 text-sm">
+            <p className="text-stone-500">Sign in to start charting your thinking.</p>
+            <p>
+              <Link href="/atlas" className="underline text-stone-700 hover:text-stone-900">
+                → View the demo atlas
+              </Link>{" "}
+              <span className="text-stone-400">(no sign-in needed)</span>
+            </p>
           </section>
         )}
       </div>
