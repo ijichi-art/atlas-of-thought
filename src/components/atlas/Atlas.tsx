@@ -1,0 +1,109 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { select } from "d3-selection";
+import { zoom, zoomIdentity, type ZoomBehavior } from "d3-zoom";
+import type { SampleMap } from "@/types/atlas";
+import { AtlasDefs, MapBackdrop } from "./AtlasDefs";
+import { Sea } from "./Sea";
+import { Country } from "./Country";
+import { River } from "./River";
+import { MountainRange } from "./MountainRange";
+import { Compass } from "./Compass";
+
+const MIN_SCALE = 0.4;
+const MAX_SCALE = 6;
+
+export function Atlas({ map }: { map: SampleMap }) {
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const contentRef = useRef<SVGGElement | null>(null);
+  const zoomRef = useRef<ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+  const [scale, setScale] = useState(1);
+
+  useEffect(() => {
+    const svg = svgRef.current;
+    const content = contentRef.current;
+    if (!svg || !content) return;
+
+    const behavior = zoom<SVGSVGElement, unknown>()
+      .scaleExtent([MIN_SCALE, MAX_SCALE])
+      .on("zoom", (event) => {
+        const { x, y, k } = event.transform;
+        content.setAttribute("transform", `translate(${x} ${y}) scale(${k})`);
+        setScale(k);
+      });
+
+    zoomRef.current = behavior;
+    select(svg).call(behavior).call(behavior.transform, zoomIdentity);
+
+    return () => {
+      select(svg).on(".zoom", null);
+    };
+  }, []);
+
+  const stepZoom = (factor: number) => {
+    const svg = svgRef.current;
+    const behavior = zoomRef.current;
+    if (!svg || !behavior) return;
+    select(svg).transition().duration(200).call(behavior.scaleBy, factor);
+  };
+
+  const { width, height } = map.viewBox;
+
+  return (
+    <div className="relative w-full h-full bg-[#e8eef3]">
+      <svg
+        ref={svgRef}
+        viewBox={`0 0 ${width} ${height}`}
+        preserveAspectRatio="xMidYMid meet"
+        className="w-full h-full cursor-grab active:cursor-grabbing block"
+      >
+        <AtlasDefs />
+        <g ref={contentRef}>
+          <MapBackdrop width={width} height={height} />
+          <Sea width={width} height={height} color={map.sea.color} />
+          {map.countries.map((c) => (
+            <Country key={c.id} data={c} />
+          ))}
+          {map.rivers.map((r) => (
+            <River key={r.id} data={r} />
+          ))}
+          {map.mountainRanges.map((m) => (
+            <MountainRange key={m.id} data={m} />
+          ))}
+        </g>
+      </svg>
+
+      {/* Floating chrome — kept minimal, Google-Maps-ish */}
+      <div className="absolute top-3 left-3 bg-white rounded-md shadow-md px-3 py-2 text-sm text-stone-700">
+        <span className="font-medium">{map.title}</span>
+      </div>
+
+      <div className="absolute top-3 right-3">
+        <Compass size={40} />
+      </div>
+
+      {/* Zoom controls — bottom-right, like Google Maps */}
+      <div className="absolute bottom-6 right-3 flex flex-col rounded-md overflow-hidden shadow-md bg-white">
+        <button
+          aria-label="Zoom in"
+          onClick={() => stepZoom(1.3)}
+          className="w-9 h-9 text-lg text-stone-700 hover:bg-stone-100 border-b border-stone-200 leading-none"
+        >
+          +
+        </button>
+        <button
+          aria-label="Zoom out"
+          onClick={() => stepZoom(1 / 1.3)}
+          className="w-9 h-9 text-lg text-stone-700 hover:bg-stone-100 leading-none"
+        >
+          −
+        </button>
+      </div>
+
+      <div className="absolute bottom-1 left-3 text-[10px] text-stone-500 font-mono select-none">
+        {Math.round(scale * 100)}% · scroll to zoom · drag to pan
+      </div>
+    </div>
+  );
+}
