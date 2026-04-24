@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { TerraformPanel } from "./TerraformPanel";
 import { SharePanel } from "./SharePanel";
+import { MapTitle } from "./MapTitle";
 import { AtlasView } from "./AtlasView";
 
 export default async function UserAtlasPage({ params }: { params: Promise<{ mapId: string }> }) {
@@ -29,7 +30,7 @@ export default async function UserAtlasPage({ params }: { params: Promise<{ mapI
           <Link href="/" className="text-stone-500 hover:text-stone-800">
             ← Home
           </Link>
-          <span className="text-stone-700 font-medium">{map.title}</span>
+          <MapTitle mapId={map.id} initial={map.title} />
           <span className="text-stone-400 text-xs">
             {map._count.conversations} conversations · {map._count.cities} cities
           </span>
