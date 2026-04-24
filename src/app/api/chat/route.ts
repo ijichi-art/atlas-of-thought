@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { getAnthropicClient, DEFAULT_CHAT_MODEL } from "@/lib/anthropic";
+import { getAiClient } from "@/lib/ai-client";
 
 const Body = z.object({
   cityLabel: z.string().min(1).max(200),
@@ -29,10 +29,10 @@ export async function POST(req: Request) {
   }
   const { cityLabel, citySummary, countryName, history = [], text, conversationId } = parsed.data;
 
-  const client = await getAnthropicClient(userId);
-  if (!client) {
+  const aiClient = await getAiClient(userId);
+  if (!aiClient) {
     return NextResponse.json(
-      { error: "no_api_key", message: "Add your Anthropic API key in Settings first." },
+      { error: "no_api_key", message: "Add an API key in Settings first." },
       { status: 402 }
     );
   }
@@ -62,11 +62,7 @@ export async function POST(req: Request) {
   }
   if (!convId) {
     const conv = await prisma.conversation.create({
-      data: {
-        mapId,
-        source: "native",
-        title: cityLabel,
-      },
+      data: { mapId, source: "native", title: cityLabel },
       select: { id: true },
     });
     convId = conv.id;
@@ -81,12 +77,7 @@ export async function POST(req: Request) {
 
   // Persist the user message immediately.
   await prisma.message.create({
-    data: {
-      conversationId: convId,
-      ordinal: nextOrdinal++,
-      role: "user",
-      text,
-    },
+    data: { conversationId: convId, ordinal: nextOrdinal++, role: "user", text },
   });
 
   const system = [
@@ -98,37 +89,24 @@ export async function POST(req: Request) {
     .filter(Boolean)
     .join("\n");
 
-  const claudeMessages = [
+  const messages = [
     ...history.map((m) => ({ role: m.role, content: m.text })),
     { role: "user" as const, content: text },
   ];
 
-  const stream = client.messages.stream({
-    model: DEFAULT_CHAT_MODEL,
-    max_tokens: 1024,
-    system,
-    messages: claudeMessages,
-  });
-
   const convIdCapture = convId;
   const ordinalCapture = nextOrdinal;
+  const clientStream = aiClient.stream({ system, messages });
 
   const readable = new ReadableStream({
     async start(controller) {
       const enc = new TextEncoder();
       let fullText = "";
       try {
-        for await (const event of stream) {
-          if (
-            event.type === "content_block_delta" &&
-            event.delta.type === "text_delta"
-          ) {
-            const chunk = event.delta.text;
-            fullText += chunk;
-            controller.enqueue(enc.encode(chunk));
-          }
+        for await (const chunk of clientStream) {
+          fullText += chunk;
+          controller.enqueue(enc.encode(chunk));
         }
-        // Persist assistant response.
         await prisma.message.create({
           data: {
             conversationId: convIdCapture,

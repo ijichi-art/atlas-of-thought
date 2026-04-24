@@ -1,8 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
-import { loadAnthropicKey } from "./api-keys";
+import { loadProviderKey, getUserChatProvider, type Provider } from "./api-keys";
 
-export type Provider = "anthropic" | "openai" | "deepseek";
+export type { Provider };
 
 export const PROVIDER_MODELS: Record<Provider, { label: string; models: { id: string; label: string }[] }> = {
   anthropic: {
@@ -48,24 +48,45 @@ export type AiClient = {
   stream(params: AiChatParams): AsyncIterable<string>;
 };
 
-// Simplified version that only uses Anthropic (multi-provider added in the
-// Settings/BYOK update; this keeps the chat and terraform working from day one).
 export async function getAiClient(userId: string): Promise<AiClient | null> {
-  const key = await loadAnthropicKey(userId);
-  if (!key) return null;
+  const provider = await getUserChatProvider(userId);
+  const creds = await loadProviderKey(userId, provider);
+  if (!creds) return null;
 
-  const model = DEFAULT_MODELS.anthropic;
-  const client = new Anthropic({ apiKey: key });
+  const model = creds.model || DEFAULT_MODELS[provider];
+
+  if (provider === "anthropic") {
+    const client = new Anthropic({ apiKey: creds.key });
+    return {
+      provider,
+      model,
+      async *stream({ system, messages, maxTokens = 1024 }) {
+        const s = client.messages.stream({ model, max_tokens: maxTokens, system, messages });
+        for await (const event of s) {
+          if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+            yield event.delta.text;
+          }
+        }
+      },
+    };
+  }
+
+  const baseURL = provider === "deepseek" ? "https://api.deepseek.com" : undefined;
+  const oai = new OpenAI({ apiKey: creds.key, ...(baseURL ? { baseURL } : {}) });
 
   return {
-    provider: "anthropic",
+    provider,
     model,
     async *stream({ system, messages, maxTokens = 1024 }) {
-      const s = client.messages.stream({ model, max_tokens: maxTokens, system, messages });
-      for await (const event of s) {
-        if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-          yield event.delta.text;
-        }
+      const s = await oai.chat.completions.create({
+        model,
+        max_tokens: maxTokens,
+        stream: true,
+        messages: [{ role: "system", content: system }, ...messages],
+      });
+      for await (const chunk of s) {
+        const text = chunk.choices[0]?.delta?.content;
+        if (text) yield text;
       }
     },
   };
