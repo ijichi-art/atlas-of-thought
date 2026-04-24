@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { TerraformPanel } from "./TerraformPanel";
+import { SharePanel } from "./SharePanel";
 import { AtlasView } from "./AtlasView";
 
 export default async function UserAtlasPage({ params }: { params: Promise<{ mapId: string }> }) {
@@ -33,11 +34,14 @@ export default async function UserAtlasPage({ params }: { params: Promise<{ mapI
             {map._count.conversations} conversations · {map._count.cities} cities
           </span>
         </div>
-        <TerraformPanel
-          mapId={map.id}
-          conversationCount={map._count.conversations}
-          cityCount={map._count.cities}
-        />
+        <div className="flex items-center gap-2">
+          <SharePanel mapId={map.id} />
+          <TerraformPanel
+            mapId={map.id}
+            conversationCount={map._count.conversations}
+            cityCount={map._count.cities}
+          />
+        </div>
       </header>
       <div className="flex-1 min-h-0">
         <AtlasView mapId={map.id} cityCount={map._count.cities} />
