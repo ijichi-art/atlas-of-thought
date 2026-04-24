@@ -1,8 +1,18 @@
 import Link from "next/link";
 import { auth, signIn, signOut } from "@/auth";
+import { prisma } from "@/lib/prisma";
 
 export default async function Home() {
   const session = await auth();
+
+  let maps: { id: string; title: string; _count: { conversations: number; cities: number } }[] = [];
+  if (session?.user?.id) {
+    maps = await prisma.map.findMany({
+      where: { userId: session.user.id },
+      select: { id: true, title: true, _count: { select: { conversations: true, cities: true } } },
+      orderBy: { updatedAt: "desc" },
+    });
+  }
 
   return (
     <main className="min-h-screen bg-stone-50 text-stone-800">
@@ -43,31 +53,59 @@ export default async function Home() {
         <section className="mb-12">
           <p className="text-lg leading-relaxed text-stone-700 max-w-prose">
             Turn your AI conversations into a living map. Import past chats from
-            ChatGPT, Claude, or Claude Code, and watch them grow into countries,
-            cities, and roads — terrain you can explore.
+            ChatGPT, Claude, or Claude Code — Claude clusters them into countries,
+            cities, and roads you can explore and continue from the map.
           </p>
-          <p className="mt-3 text-xs text-stone-400">Phase 0 — foundations</p>
         </section>
 
         {session?.user ? (
-          <section className="space-y-4">
-            <h2 className="text-sm uppercase tracking-wider text-stone-500">Get started</h2>
-            <ul className="space-y-2 text-stone-700">
-              <li>
-                <Link href="/settings" className="underline hover:text-stone-900">
-                  → Add your Anthropic API key (BYOK)
-                </Link>
-              </li>
-              <li className="text-stone-400">
-                → Import past conversations <em>(Phase 2)</em>
-              </li>
-              <li>
-                <Link href="/atlas" className="underline hover:text-stone-900">
-                  → View the demo atlas <em className="text-stone-400">(static, Phase 1 PR-1)</em>
-                </Link>
-              </li>
-            </ul>
-          </section>
+          <div className="space-y-10">
+            {/* My maps */}
+            {maps.length > 0 && (
+              <section>
+                <h2 className="text-sm uppercase tracking-wider text-stone-500 mb-3">My maps</h2>
+                <ul className="space-y-2">
+                  {maps.map((m) => (
+                    <li key={m.id}>
+                      <Link
+                        href={`/atlas/${m.id}`}
+                        className="flex items-center justify-between group px-4 py-3 bg-white border border-stone-200 rounded hover:border-stone-400 transition-colors"
+                      >
+                        <span className="font-medium text-stone-800 group-hover:text-stone-900">
+                          {m.title}
+                        </span>
+                        <span className="text-xs text-stone-400">
+                          {m._count.conversations} conversations · {m._count.cities} cities →
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
+            {/* Actions */}
+            <section>
+              <h2 className="text-sm uppercase tracking-wider text-stone-500 mb-3">Actions</h2>
+              <ul className="space-y-2 text-sm text-stone-700">
+                <li>
+                  <Link href="/import" className="underline hover:text-stone-900">
+                    → Import conversations
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/settings" className="underline hover:text-stone-900">
+                    → Settings (API key, model)
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/atlas" className="underline hover:text-stone-900 text-stone-500">
+                    → Demo atlas (static)
+                  </Link>
+                </li>
+              </ul>
+            </section>
+          </div>
         ) : (
           <section className="space-y-3 text-sm">
             <p className="text-stone-500">Sign in to start charting your thinking.</p>
