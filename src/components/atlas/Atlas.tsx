@@ -13,6 +13,7 @@ import { Compass } from "./Compass";
 import { City } from "./City";
 import { Road } from "./Road";
 import { Legend } from "./Legend";
+import { CityDetailPanel } from "./CityDetailPanel";
 
 const MIN_SCALE = 0.4;
 const MAX_SCALE = 6;
@@ -24,6 +25,12 @@ export function Atlas({ map }: { map: SampleMap }) {
   const [scale, setScale] = useState(1);
   const [selectedCityId, setSelectedCityId] = useState<string | null>(null);
   const cityById = useMemo(() => new Map(map.cities.map((c) => [c.id, c])), [map.cities]);
+  const countryById = useMemo(
+    () => new Map(map.countries.map((c) => [c.id, c])),
+    [map.countries],
+  );
+  const selectedCity = selectedCityId ? cityById.get(selectedCityId) ?? null : null;
+  const selectedCountry = selectedCity ? countryById.get(selectedCity.countryId) ?? null : null;
 
   useEffect(() => {
     const svg = svgRef.current;
@@ -125,6 +132,12 @@ export function Atlas({ map }: { map: SampleMap }) {
       <div className="absolute bottom-1 left-1/2 -translate-x-1/2 text-[10px] text-stone-500 font-mono select-none">
         {Math.round(scale * 100)}% · scroll to zoom · drag to pan
       </div>
+
+      <CityDetailPanel
+        city={selectedCity}
+        country={selectedCountry}
+        onClose={() => setSelectedCityId(null)}
+      />
     </div>
   );
 }
