@@ -1,14 +1,22 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
-import { getAnthropicKeyMeta } from "@/lib/api-keys";
+import { prisma } from "@/lib/prisma";
+import { getUserChatProvider } from "@/lib/api-keys";
 import { ApiKeyForm } from "./ApiKeyForm";
 
 export default async function SettingsPage() {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
+  const userId = session.user.id;
 
-  const meta = await getAnthropicKeyMeta(session.user.id);
+  const [keys, activeProvider] = await Promise.all([
+    prisma.apiKey.findMany({
+      where: { userId },
+      select: { provider: true, hint: true, model: true, label: true, lastUsedAt: true },
+    }),
+    getUserChatProvider(userId),
+  ]);
 
   return (
     <main className="min-h-screen bg-stone-50 text-stone-800">
@@ -17,33 +25,29 @@ export default async function SettingsPage() {
           ← Back
         </Link>
         <h1 className="text-2xl font-serif mt-4 mb-2">Settings</h1>
-        <p className="text-sm text-stone-500 mb-12">
-          Your Anthropic API key is encrypted with AES-256-GCM before being stored.
-          We never log it, and the browser only sees it during submission.
+        <p className="text-sm text-stone-500 mb-10">
+          API keys are encrypted with AES-256-GCM before storage. The browser only sees them during
+          submission. You choose which provider and model to use — costs go to your own account.
         </p>
 
         <section>
           <h2 className="text-sm uppercase tracking-wider text-stone-500 mb-4">
-            Anthropic API key (BYOK)
+            AI provider &amp; model (BYOK)
           </h2>
-          {meta ? (
-            <div className="mb-6 text-sm text-stone-700 p-4 bg-white border border-stone-200 rounded">
-              <div>
-                Key on file:{" "}
-                <code className="bg-stone-100 px-1.5 py-0.5 rounded text-xs">{meta.hint}</code>
-                {meta.label ? ` — ${meta.label}` : ""}
-              </div>
-              <div className="text-xs text-stone-400 mt-1">
-                Saved {meta.createdAt.toLocaleString()}
-                {meta.lastUsedAt ? ` · Last used ${meta.lastUsedAt.toLocaleString()}` : " · Never used"}
-              </div>
-            </div>
-          ) : (
-            <p className="mb-6 text-sm text-stone-400">No key saved yet.</p>
-          )}
-          <ApiKeyForm hasExisting={!!meta} />
-          <p className="mt-3 text-xs text-stone-400">
-            Get a key at <a className="underline" href="https://console.anthropic.com" target="_blank" rel="noreferrer">console.anthropic.com</a>.
+          <ApiKeyForm
+            initialKeys={keys}
+            initialActiveProvider={activeProvider}
+          />
+          <p className="mt-4 text-xs text-stone-400 space-y-0.5">
+            <span className="block">
+              Anthropic: <a className="underline" href="https://console.anthropic.com" target="_blank" rel="noreferrer">console.anthropic.com</a>
+            </span>
+            <span className="block">
+              OpenAI: <a className="underline" href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer">platform.openai.com/api-keys</a>
+            </span>
+            <span className="block">
+              DeepSeek: <a className="underline" href="https://platform.deepseek.com" target="_blank" rel="noreferrer">platform.deepseek.com</a>
+            </span>
           </p>
         </section>
       </div>

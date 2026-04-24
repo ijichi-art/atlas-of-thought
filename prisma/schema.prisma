@@ -27,10 +27,11 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  accounts Account[]
-  sessions Session[]
-  apiKeys  ApiKey[]
-  maps     Map[]
+  accounts    Account[]
+  sessions    Session[]
+  apiKeys     ApiKey[]
+  maps        Map[]
+  preference  UserPreference?
 }
 
 model Account {
@@ -81,12 +82,22 @@ model ApiKey {
   // Last 4 chars of the plaintext key, for display ("sk-...abcd")
   hint        String
   label       String?
+  // User's chosen model for this provider. Empty string = use the provider default.
+  model       String   @default("")
   createdAt   DateTime @default(now())
   lastUsedAt  DateTime?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, provider])
+}
+
+// Stores the user's active chat provider selection.
+model UserPreference {
+  userId       String @id
+  chatProvider String @default("anthropic")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 // ============================================================================
