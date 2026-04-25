@@ -521,11 +521,11 @@ function countryPolygonFromCities(
 // get dropped first.
 
 const MAX_DEGREE = 3;
-const PARALLEL_ANGLE_DEG = 35;
-const PARALLEL_LEN_RATIO = 0.45; // <45% length difference counts as "similar"
+const PARALLEL_ANGLE_DEG = 45;
+const PARALLEL_LEN_RATIO = 0.5; // <50% length difference counts as "similar"
 // Two roads count as visually overlapping if their midpoints are within this many
 // canvas units AND they head in the same direction (within PARALLEL_ANGLE_DEG).
-const VISUAL_OVERLAP_DIST = 90;
+const VISUAL_OVERLAP_DIST = 130;
 
 function typeRank(t: "highway" | "regular" | "trail" | "ferry"): number {
   return t === "highway" ? 0 : t === "regular" ? 1 : t === "trail" ? 2 : 3;
@@ -628,6 +628,10 @@ function pruneRoads(
     return ang;
   };
 
+  // The visual-overlap pass now applies to ALL pairs, including ones that
+  // share a city. Even a Y-junction can be visually redundant if both arms
+  // head in nearly the same direction (which the user observed and complained
+  // about — see roads #7 and #21 in the screenshot from 2026-04-26).
   const dropped = new Set<number>();
   for (let i = 0; i < kept.length; i++) {
     if (dropped.has(i)) continue;
@@ -635,14 +639,6 @@ function pruneRoads(
     const di = dirOf(kept[i]);
     for (let j = i + 1; j < kept.length; j++) {
       if (dropped.has(j)) continue;
-      // Don't bundle if they share a city — that's a real Y-junction.
-      if (
-        kept[i].fromId === kept[j].fromId ||
-        kept[i].fromId === kept[j].toId ||
-        kept[i].toId === kept[j].fromId ||
-        kept[i].toId === kept[j].toId
-      )
-        continue;
 
       const mj = midOf(kept[j]);
       const dx = mi[0] - mj[0];
@@ -656,10 +652,10 @@ function pruneRoads(
       if (angDiff > (PARALLEL_ANGLE_DEG * Math.PI) / 180) continue;
 
       // Both close & parallel → drop the one with the less-important type
-      // (lengths similar enough that this distinction matters).
+      // (lower priority = bigger typeRank number).
       const dropIdx = typeRank(kept[i].type) <= typeRank(kept[j].type) ? j : i;
       dropped.add(dropIdx);
-      if (dropIdx === i) break; // don't compare i further if i is dropped
+      if (dropIdx === i) break;
     }
   }
 
