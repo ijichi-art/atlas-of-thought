@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import type { SampleMap, CityData, CountryData, RoadData, Point } from "@/types/atlas";
@@ -90,4 +91,33 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   };
 
   return NextResponse.json(sampleMap);
+}
+
+const PatchBody = z.object({ title: z.string().min(1).max(120) });
+
+export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const session = await auth();
+  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { id: mapId } = await params;
+
+  const parsed = PatchBody.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ error: "Invalid body" }, { status: 400 });
+
+  const map = await prisma.map.findFirst({ where: { id: mapId, userId: session.user.id }, select: { id: true } });
+  if (!map) return NextResponse.json({ error: "Map not found" }, { status: 404 });
+
+  const updated = await prisma.map.update({ where: { id: mapId }, data: { title: parsed.data.title }, select: { id: true, title: true } });
+  return NextResponse.json(updated);
+}
+
+export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const session = await auth();
+  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { id: mapId } = await params;
+
+  const map = await prisma.map.findFirst({ where: { id: mapId, userId: session.user.id }, select: { id: true } });
+  if (!map) return NextResponse.json({ error: "Map not found" }, { status: 404 });
+
+  await prisma.map.delete({ where: { id: mapId } });
+  return NextResponse.json({ ok: true });
 }

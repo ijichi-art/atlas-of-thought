@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { auth, signIn, signOut } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { MapList } from "./MapList";
 
 export default async function Home() {
   const session = await auth();
@@ -60,31 +61,8 @@ export default async function Home() {
 
         {session?.user ? (
           <div className="space-y-10">
-            {/* My maps */}
-            {maps.length > 0 && (
-              <section>
-                <h2 className="text-sm uppercase tracking-wider text-stone-500 mb-3">My maps</h2>
-                <ul className="space-y-2">
-                  {maps.map((m) => (
-                    <li key={m.id}>
-                      <Link
-                        href={`/atlas/${m.id}`}
-                        className="flex items-center justify-between group px-4 py-3 bg-white border border-stone-200 rounded hover:border-stone-400 transition-colors"
-                      >
-                        <span className="font-medium text-stone-800 group-hover:text-stone-900">
-                          {m.title}
-                        </span>
-                        <span className="text-xs text-stone-400">
-                          {m._count.conversations} conversations · {m._count.cities} cities →
-                        </span>
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            )}
+            <MapList maps={maps} />
 
-            {/* Actions */}
             <section>
               <h2 className="text-sm uppercase tracking-wider text-stone-500 mb-3">Actions</h2>
               <ul className="space-y-2 text-sm text-stone-700">
