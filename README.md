@@ -2,7 +2,7 @@
 
 > Turn your AI conversations into a living map. Explore the terrain of your own thinking.
 
-**Status:** pre-alpha. Phase 0 (foundations).
+**Status:** pre-alpha. Phases 0–5 complete; approaching public launch.
 
 Atlas of Thought is a spatial alternative to chat UIs. Import your past AI
 conversations (ChatGPT, Claude, Claude Code), and watch them grow into a map:
@@ -28,13 +28,13 @@ layout — Atlas of Thought generates a **geographic map** automatically.
 
 ## Roadmap
 
-- **Phase 0** — Foundations: Next.js + Postgres, auth, BYOK encryption ← *we are here*
-- **Phase 1** — Map viewer (port the prototype to React)
-- **Phase 2** — Importers: ChatGPT / Claude / Claude Code logs
-- **Phase 3** — Resume conversations from any city
-- **Phase 4** — Auto-terraforming with Claude (LLM + force layout)
-- **Phase 5** — Public sharing (URLs, OGP, embeds)
-- **Phase 6** — City-to-city comparison; artifact landmarks
+- ✅ **Phase 0** — Foundations: Next.js + Postgres, auth, BYOK encryption
+- ✅ **Phase 1** — Map viewer (SVG atlas with d3-zoom pan/zoom)
+- ✅ **Phase 2** — Importers: ChatGPT / Claude / Claude Code logs
+- ✅ **Phase 3** — Resume conversations from any city
+- ✅ **Phase 4** — Auto-terraforming with Claude (LLM + layout math)
+- ✅ **Phase 5** — Public sharing (URLs, OGP, embeds)
+- **Phase 6** — City-to-city comparison; artifact landmarks ← *next*
 - **Phase 7** — Public launch (Show HN, Product Hunt)
 
 ## Stack
@@ -43,19 +43,50 @@ Next.js 16 (App Router) · TypeScript · Tailwind 4 · Prisma + Postgres
 (pgvector for Phase 4) · Auth.js v5 · Anthropic SDK · D3-force · Zustand ·
 Framer Motion.
 
-## Local development
+## Self-hosting with Docker
 
-Prerequisites: Node 20+, Postgres 16+ (pgvector required from Phase 4 onward).
+The fastest way to run Atlas of Thought in production.
 
 ```bash
-git clone https://github.com/<your-username>/atlas-of-thought.git
+git clone https://github.com/ijichi-art/atlas-of-thought.git
+cd atlas-of-thought
+cp .env.example .env
+
+# Fill in .env (see below for required values), then:
+docker compose up -d
+```
+
+Open <http://localhost:3000>.
+
+**Required `.env` values:**
+
+| Variable | How to get it |
+|---|---|
+| `AUTH_SECRET` | `openssl rand -base64 32` |
+| `ENCRYPTION_KEY` | `openssl rand -base64 32` |
+| `AUTH_GITHUB_ID` / `AUTH_GITHUB_SECRET` | [Create a GitHub OAuth app](https://github.com/settings/developers). Callback URL: `http://your-domain/api/auth/callback/github` |
+| `AUTH_URL` | Your public URL, e.g. `https://atlas.example.com` |
+| `NEXT_PUBLIC_ORIGIN` | Same as `AUTH_URL` (used for share links and OGP) |
+
+The app container runs `prisma migrate deploy` on start — the database
+is always up to date automatically.
+
+> **⚠️ Key rotation warning:** rotating `ENCRYPTION_KEY` invalidates all
+> stored user API keys. Back it up somewhere safe.
+
+## Local development
+
+Prerequisites: Node 20+, Postgres 16+ with pgvector.
+
+```bash
+git clone https://github.com/ijichi-art/atlas-of-thought.git
 cd atlas-of-thought
 npm install
 cp .env.example .env.local
-# Edit .env.local — DATABASE_URL, AUTH_SECRET, AUTH_GITHUB_ID/SECRET, ENCRYPTION_KEY
+# Edit .env.local — see the table above for required values
 
-# Generate AUTH_SECRET and ENCRYPTION_KEY:
-#   openssl rand -base64 32
+# Spin up a local Postgres (or use the compose postgres-only service):
+docker compose up -d postgres
 
 # Initialize the database:
 npx prisma migrate dev
@@ -63,7 +94,7 @@ npx prisma migrate dev
 npm run dev
 ```
 
-Open <http://localhost:3000>.
+Open <http://localhost:3002> (dev server runs on port 3002).
 
 ## BYOK (Bring Your Own Key)
 
