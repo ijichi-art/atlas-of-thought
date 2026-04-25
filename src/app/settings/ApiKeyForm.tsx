@@ -117,14 +117,14 @@ function ProviderSection({
 
             <div>
               <label className="block text-xs text-stone-500 mb-1">
-                Model <span className="text-stone-400">(optional, defaults to cheapest)</span>
+                Model <span className="text-stone-400">(optional — empty = best available model)</span>
               </label>
               <select
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
                 className="w-full text-sm px-3 py-2 border border-stone-300 rounded focus:border-stone-500 focus:outline-none bg-white"
               >
-                <option value="">— provider default —</option>
+                <option value="">— auto (best for this provider) —</option>
                 {info.models.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.label}
