@@ -508,9 +508,12 @@ function countryPolygonFromCities(
 // When trimming over-degree edges, longer / less-important / parallel edges
 // get dropped first.
 
-const MAX_DEGREE = 4;
-const PARALLEL_ANGLE_DEG = 30;
-const PARALLEL_LEN_RATIO = 0.4; // <40% length difference counts as "similar"
+const MAX_DEGREE = 3;
+const PARALLEL_ANGLE_DEG = 35;
+const PARALLEL_LEN_RATIO = 0.45; // <45% length difference counts as "similar"
+// Two roads count as visually overlapping if their midpoints are within this many
+// canvas units AND they head in the same direction (within PARALLEL_ANGLE_DEG).
+const VISUAL_OVERLAP_DIST = 90;
 
 function typeRank(t: "highway" | "regular" | "trail" | "ferry"): number {
   return t === "highway" ? 0 : t === "regular" ? 1 : t === "trail" ? 2 : 3;
@@ -594,7 +597,61 @@ function pruneRoads(
     keptEdgesByCity.set(e.toId, toKept);
   }
 
-  return kept;
+  // Step 3: global "visual overlap" pass — drop any kept edge whose midpoint is
+  // close to another kept edge's midpoint AND points the same direction.
+  // (Catches cases where two roads don't share a city but visually run in parallel
+  // because their endpoints happen to be near each other.)
+  const midOf = (e: PruneCandidate): [number, number] => {
+    const a = positionsById.get(e.fromId)!;
+    const b = positionsById.get(e.toId)!;
+    return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  };
+  const dirOf = (e: PruneCandidate): number => {
+    const a = positionsById.get(e.fromId)!;
+    const b = positionsById.get(e.toId)!;
+    // Normalize to [0, π) — undirected
+    let ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+    if (ang < 0) ang += Math.PI;
+    if (ang >= Math.PI) ang -= Math.PI;
+    return ang;
+  };
+
+  const dropped = new Set<number>();
+  for (let i = 0; i < kept.length; i++) {
+    if (dropped.has(i)) continue;
+    const mi = midOf(kept[i]);
+    const di = dirOf(kept[i]);
+    for (let j = i + 1; j < kept.length; j++) {
+      if (dropped.has(j)) continue;
+      // Don't bundle if they share a city — that's a real Y-junction.
+      if (
+        kept[i].fromId === kept[j].fromId ||
+        kept[i].fromId === kept[j].toId ||
+        kept[i].toId === kept[j].fromId ||
+        kept[i].toId === kept[j].toId
+      )
+        continue;
+
+      const mj = midOf(kept[j]);
+      const dx = mi[0] - mj[0];
+      const dy = mi[1] - mj[1];
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d > VISUAL_OVERLAP_DIST) continue;
+
+      const dj = dirOf(kept[j]);
+      let angDiff = Math.abs(di - dj);
+      if (angDiff > Math.PI / 2) angDiff = Math.PI - angDiff;
+      if (angDiff > (PARALLEL_ANGLE_DEG * Math.PI) / 180) continue;
+
+      // Both close & parallel → drop the one with the less-important type
+      // (lengths similar enough that this distinction matters).
+      const dropIdx = typeRank(kept[i].type) <= typeRank(kept[j].type) ? j : i;
+      dropped.add(dropIdx);
+      if (dropIdx === i) break; // don't compare i further if i is dropped
+    }
+  }
+
+  return kept.filter((_, i) => !dropped.has(i));
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -603,6 +660,7 @@ export type TerraformResult = {
   countriesCreated: number;
   citiesCreated: number;
   roadsCreated: number;
+  roadsCandidates: number; // before pruning — useful to see how aggressive the filter was
   conversationsPlaced: number;
 };
 
@@ -622,7 +680,7 @@ export async function terraform(mapId: string, ai: AiClient): Promise<TerraformR
   });
 
   if (allConvs.length === 0) {
-    return { countriesCreated: 0, citiesCreated: 0, roadsCreated: 0, conversationsPlaced: 0 };
+    return { countriesCreated: 0, citiesCreated: 0, roadsCreated: 0, roadsCandidates: 0, conversationsPlaced: 0 };
   }
 
   const inputs: ConvInput[] = allConvs.map((c) => {
@@ -789,6 +847,7 @@ export async function terraform(mapId: string, ai: AiClient): Promise<TerraformR
     countriesCreated: countryIdByIdx.size,
     citiesCreated: cityIdByConvIdx.size,
     roadsCreated: roadIds.length,
+    roadsCandidates: candidates.length,
     conversationsPlaced: cityIdByConvIdx.size,
   };
 }
