@@ -9,8 +9,9 @@ import type { AiClient } from "./ai-client";
 
 const CX = 820;
 const CY = 500;
-const RING_RADIUS = 250;   // country centers orbit this far from map center
-const CITY_SPREAD = 80;    // cities scatter within this radius of their country center
+const RING_RADIUS = 320;   // country centers orbit this far from map center
+const CITY_SPREAD_BASE = 70;
+const CITY_SPREAD_PER = 12; // per extra city in the country
 const VIEW_W = 1640;
 const VIEW_H = 1000;
 
@@ -141,10 +142,20 @@ function cityPosition(
   seed: number
 ): { x: number; y: number } {
   const rng = mulberry32(seed + index * 137);
-  const angle = rng() * 2 * Math.PI;
-  // Capital stays near center; others scatter further out.
-  const maxR = index === 0 ? CITY_SPREAD * 0.35 : CITY_SPREAD;
-  const r = rng() * maxR;
+  const spread = CITY_SPREAD_BASE + Math.max(0, total - 1) * CITY_SPREAD_PER;
+  // Capital stays near center; non-capital cities placed evenly on a ring around it.
+  if (index === 0) {
+    const angle = rng() * 2 * Math.PI;
+    const r = rng() * spread * 0.25;
+    return {
+      x: Math.max(40, Math.min(VIEW_W - 40, center.x + r * Math.cos(angle))),
+      y: Math.max(40, Math.min(VIEW_H - 40, center.y + r * Math.sin(angle))),
+    };
+  }
+  const ringSlots = Math.max(1, total - 1);
+  const angle = (2 * Math.PI * (index - 1)) / ringSlots + rng() * 0.4;
+  const jitter = 0.85 + rng() * 0.3;
+  const r = spread * jitter;
   return {
     x: Math.max(40, Math.min(VIEW_W - 40, center.x + r * Math.cos(angle))),
     y: Math.max(40, Math.min(VIEW_H - 40, center.y + r * Math.sin(angle))),
@@ -152,14 +163,20 @@ function cityPosition(
 }
 
 // Hexagonal-ish country polygon, slightly irregular.
-function countryPolygon(center: { x: number; y: number }, seed: number): [number, number][] {
+// baseR scales so the polygon comfortably contains all cities placed inside it.
+function countryPolygon(
+  center: { x: number; y: number },
+  seed: number,
+  cityCount: number,
+): [number, number][] {
   const rng = mulberry32(seed);
   const sides = 6;
-  const baseR = 120;
+  const spread = CITY_SPREAD_BASE + Math.max(0, cityCount - 1) * CITY_SPREAD_PER;
+  const baseR = spread + 60; // padding around the city cloud
   const points: [number, number][] = [];
   for (let i = 0; i < sides; i++) {
     const angle = (2 * Math.PI * i) / sides + rng() * 0.4;
-    const r = baseR * (0.75 + rng() * 0.5);
+    const r = baseR * (0.85 + rng() * 0.35);
     points.push([
       Math.round(center.x + r * Math.cos(angle)),
       Math.round(center.y + r * Math.sin(angle)),
@@ -237,12 +254,19 @@ export async function terraform(mapId: string, ai: AiClient): Promise<TerraformR
     prisma.country.deleteMany({ where: { mapId } }),
   ]);
 
+  // Pre-count cities per country so polygon size can scale.
+  const cityCountByCountry = new Map<number, number>();
+  for (const c of validCities) {
+    const cIdx = Math.min(Math.max(0, c.countryIndex), rawCountries.length - 1);
+    cityCountByCountry.set(cIdx, (cityCountByCountry.get(cIdx) ?? 0) + 1);
+  }
+
   // Create countries.
   const createdCountries: { id: string; centerX: number; centerY: number }[] = [];
   for (let i = 0; i < rawCountries.length; i++) {
     const rc = rawCountries[i];
     const center = countryCenter(i, rawCountries.length);
-    const polygon = countryPolygon(center, i * 999 + 1);
+    const polygon = countryPolygon(center, i * 999 + 1, cityCountByCountry.get(i) ?? 1);
     const country = await prisma.country.create({
       data: {
         mapId,

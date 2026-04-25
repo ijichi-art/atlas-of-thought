@@ -28,12 +28,13 @@ const PIN = {
     outerR: 9,
     innerR: 5,
     centerR: 1.8,
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: 600,
     labelDy: 22,
+    minScale: 0.0,
   },
-  city: { outerR: 6, innerR: 3.5, centerR: 0, fontSize: 11, fontWeight: 500, labelDy: 17 },
-  town: { outerR: 3.2, innerR: 0, centerR: 0, fontSize: 9.5, fontWeight: 400, labelDy: 12 },
+  city: { outerR: 6, innerR: 3.5, centerR: 0, fontSize: 9.5, fontWeight: 500, labelDy: 17, minScale: 0.6 },
+  town: { outerR: 3.2, innerR: 0, centerR: 0, fontSize: 8.5, fontWeight: 400, labelDy: 12, minScale: 1.1 },
 } as const;
 
 function densityBuildings(city: CityData) {
@@ -59,14 +60,18 @@ export function City({
   data,
   selected,
   onSelect,
+  scale,
 }: {
   data: CityData;
   selected: boolean;
   onSelect: (id: string) => void;
+  scale: number;
 }) {
   const style = PIN[data.rank];
   const [cx, cy] = data.position;
   const buildings = densityBuildings(data);
+  const showLabel = scale >= style.minScale;
+  const inv = 1 / scale;
 
   return (
     <g
@@ -120,43 +125,42 @@ export function City({
         <circle cx={cx} cy={cy} r={style.outerR} fill="#3a3a36" />
       )}
 
-      {/* Label */}
-      <text
-        x={cx}
-        y={cy + style.labelDy}
-        textAnchor="middle"
-        fontFamily="system-ui, -apple-system, sans-serif"
-        fontSize={style.fontSize}
-        fontWeight={style.fontWeight}
-        fill="#3a3a36"
-        pointerEvents="none"
-        style={{
-          paintOrder: "stroke fill",
-          stroke: "#f5f3ef",
-          strokeWidth: 3,
-          strokeLinejoin: "round",
-        }}
-      >
-        {data.label}
-      </text>
-      {data.labelJa && data.rank !== "town" && (
-        <text
-          x={cx}
-          y={cy + style.labelDy + style.fontSize + 1}
-          textAnchor="middle"
-          fontFamily="system-ui, -apple-system, sans-serif"
-          fontSize={Math.round(style.fontSize * 0.8)}
-          fill="#7a7166"
-          pointerEvents="none"
-          style={{
-            paintOrder: "stroke fill",
-            stroke: "#f5f3ef",
-            strokeWidth: 3,
-            strokeLinejoin: "round",
-          }}
-        >
-          {data.labelJa}
-        </text>
+      {/* Label — inverse-scaled so on-screen text size stays constant across zoom */}
+      {showLabel && (
+        <g transform={`translate(${cx} ${cy + style.labelDy * inv}) scale(${inv})`} pointerEvents="none">
+          <text
+            textAnchor="middle"
+            fontFamily="system-ui, -apple-system, sans-serif"
+            fontSize={style.fontSize}
+            fontWeight={style.fontWeight}
+            fill="#3a3a36"
+            style={{
+              paintOrder: "stroke fill",
+              stroke: "#f5f3ef",
+              strokeWidth: 3,
+              strokeLinejoin: "round",
+            }}
+          >
+            {data.label}
+          </text>
+          {data.labelJa && data.rank !== "town" && (
+            <text
+              y={style.fontSize + 1}
+              textAnchor="middle"
+              fontFamily="system-ui, -apple-system, sans-serif"
+              fontSize={Math.round(style.fontSize * 0.8)}
+              fill="#7a7166"
+              style={{
+                paintOrder: "stroke fill",
+                stroke: "#f5f3ef",
+                strokeWidth: 3,
+                strokeLinejoin: "round",
+              }}
+            >
+              {data.labelJa}
+            </text>
+          )}
+        </g>
       )}
     </g>
   );
