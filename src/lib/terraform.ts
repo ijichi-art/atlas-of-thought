@@ -620,6 +620,179 @@ function dedupePairs(candidates: RoadCandidate[]): RoadCandidate[] {
   return Array.from(byPair.values());
 }
 
+// ── Force-Directed Edge Bundling ──────────────────────────────────────────────
+//
+// Holten & van Wijk 2009. Treats each road as a flexible polyline subdivided
+// into M segments. Pairs of edges with high "compatibility" (similar bearing,
+// length, and midpoint proximity) attract each other along corresponding
+// subdivision points. Iterating produces organic bundles where roads heading
+// the same direction through the same region physically merge for their
+// shared trunk and split at the ends.
+//
+// Standard FDEB parameters; not tuned to mask issues.
+
+type EdgePath = [number, number][]; // polyline of canvas-space points
+
+function pdist(a: [number, number], b: [number, number]): number {
+  return Math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2);
+}
+
+// Resample a polyline into exactly (M+1) evenly spaced points along its length.
+function resample(poly: EdgePath, M: number): EdgePath {
+  if (poly.length < 2) return poly.slice();
+  const segLens: number[] = [];
+  let total = 0;
+  for (let i = 1; i < poly.length; i++) {
+    const d = pdist(poly[i - 1], poly[i]);
+    segLens.push(d);
+    total += d;
+  }
+  if (total === 0) return Array.from({ length: M + 1 }, () => [poly[0][0], poly[0][1]]);
+  const step = total / M;
+  const out: EdgePath = [[poly[0][0], poly[0][1]]];
+  let segIdx = 0;
+  let segStart = 0;
+  for (let k = 1; k < M; k++) {
+    const target = k * step;
+    while (segIdx < segLens.length && segStart + segLens[segIdx] < target) {
+      segStart += segLens[segIdx];
+      segIdx++;
+    }
+    if (segIdx >= segLens.length) {
+      const last = poly[poly.length - 1];
+      out.push([last[0], last[1]]);
+      continue;
+    }
+    const t = (target - segStart) / segLens[segIdx];
+    const a = poly[segIdx];
+    const b = poly[segIdx + 1];
+    out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+  }
+  const last = poly[poly.length - 1];
+  out.push([last[0], last[1]]);
+  return out;
+}
+
+// Compatibility score (0..1): how strongly two edges should attract.
+// Standard FDEB: angle × scale × position. Higher = more compatible.
+function compatibility(a: EdgePath, b: EdgePath): number {
+  const a0 = a[0];
+  const a1 = a[a.length - 1];
+  const b0 = b[0];
+  const b1 = b[b.length - 1];
+  const aLen = pdist(a0, a1);
+  const bLen = pdist(b0, b1);
+  if (aLen < 1e-3 || bLen < 1e-3) return 0;
+  const lavg = (aLen + bLen) / 2;
+
+  // Angle compatibility (undirected): |cos(θ)|
+  const adx = (a1[0] - a0[0]) / aLen;
+  const ady = (a1[1] - a0[1]) / aLen;
+  const bdx = (b1[0] - b0[0]) / bLen;
+  const bdy = (b1[1] - b0[1]) / bLen;
+  const Ca = Math.abs(adx * bdx + ady * bdy);
+
+  // Scale compatibility: 1 if equal length, → 0 as they diverge
+  const Cs = 2 / (lavg / Math.min(aLen, bLen) + Math.max(aLen, bLen) / lavg);
+
+  // Position compatibility: 1 if midpoints coincident, → 0 as separation grows
+  const aMx = (a0[0] + a1[0]) / 2;
+  const aMy = (a0[1] + a1[1]) / 2;
+  const bMx = (b0[0] + b1[0]) / 2;
+  const bMy = (b0[1] + b1[1]) / 2;
+  const midD = Math.sqrt((aMx - bMx) ** 2 + (aMy - bMy) ** 2);
+  const Cp = lavg / (lavg + midD);
+
+  return Ca * Cs * Cp;
+}
+
+// Run FDEB on a list of polylines. Returns bundled polylines (same shape).
+// "Bundled" means roads that fly through the same corridor physically share
+// their middle subdivision points — they overlap on the trunk and diverge
+// only at the endpoints.
+function fdebBundle(
+  paths: EdgePath[],
+  opts: {
+    iterations?: number;
+    subdivisions?: number;
+    initialStep?: number;
+    cooling?: number;
+    springK?: number;
+    compatibilityThreshold?: number;
+  } = {},
+): EdgePath[] {
+  const iterations = opts.iterations ?? 60;
+  const M = opts.subdivisions ?? 8;
+  let step = opts.initialStep ?? 0.5;
+  const cooling = opts.cooling ?? 0.95;
+  const K = opts.springK ?? 0.1;
+  const Cthresh = opts.compatibilityThreshold ?? 0.6;
+
+  // Resample every path to (M+1) points
+  const sub: EdgePath[] = paths.map((p) => resample(p, M));
+  const N = sub.length;
+
+  // Pre-compute compatible pairs (compatibility uses original endpoints, stable)
+  type CPair = { i: number; j: number; w: number };
+  const pairs: CPair[] = [];
+  for (let i = 0; i < N; i++) {
+    for (let j = i + 1; j < N; j++) {
+      const w = compatibility(sub[i], sub[j]);
+      if (w > Cthresh) pairs.push({ i, j, w });
+    }
+  }
+
+  // Iterate: attractive force between corresponding interior points of
+  // compatible edges, plus spring force keeping each path "smooth".
+  for (let iter = 0; iter < iterations; iter++) {
+    // Accumulate displacements (don't update in-place mid-iteration)
+    const dx: number[][] = sub.map((p) => p.map(() => 0));
+    const dy: number[][] = sub.map((p) => p.map(() => 0));
+
+    for (const { i, j, w } of pairs) {
+      const Pi = sub[i];
+      const Pj = sub[j];
+      for (let k = 1; k < Pi.length - 1; k++) {
+        const ddx = Pj[k][0] - Pi[k][0];
+        const ddy = Pj[k][1] - Pi[k][1];
+        const d = Math.sqrt(ddx * ddx + ddy * ddy);
+        if (d < 1e-3) continue;
+        // Inverse-distance attractive force, scaled by compatibility
+        const f = (w * step) / Math.max(d, 8);
+        dx[i][k] += ddx * f;
+        dy[i][k] += ddy * f;
+        dx[j][k] -= ddx * f;
+        dy[j][k] -= ddy * f;
+      }
+    }
+
+    // Spring force: pull each interior point toward the midpoint of its
+    // neighbours. Keeps the polyline taut.
+    for (let i = 0; i < N; i++) {
+      const P = sub[i];
+      for (let k = 1; k < P.length - 1; k++) {
+        const mx = (P[k - 1][0] + P[k + 1][0]) / 2;
+        const my = (P[k - 1][1] + P[k + 1][1]) / 2;
+        dx[i][k] += (mx - P[k][0]) * K;
+        dy[i][k] += (my - P[k][1]) * K;
+      }
+    }
+
+    // Apply
+    for (let i = 0; i < N; i++) {
+      const P = sub[i];
+      for (let k = 1; k < P.length - 1; k++) {
+        P[k][0] += dx[i][k];
+        P[k][1] += dy[i][k];
+      }
+    }
+
+    step *= cooling;
+  }
+
+  return sub;
+}
+
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
@@ -808,15 +981,39 @@ export async function terraform(mapId: string, ai: AiClient): Promise<TerraformR
   // Compute centroids ONCE — every road shares the same hierarchy snapshot.
   const { districtCentroids, countryCentroids } = computeCentroids(positions, assignments);
 
-  const roadIds: string[] = [];
-  for (const r of finalRoads) {
-    const waypoints = bundledWaypoints(
+  // 1. Hierarchical waypoints (district / country centroids) provide the trunk.
+  const initialPaths: EdgePath[] = finalRoads.map((r) => {
+    const fromPos = positions.get(r.fromConvIdx);
+    const toPos = positions.get(r.toConvIdx);
+    if (!fromPos || !toPos) return [];
+    const wps = bundledWaypoints(
       r.fromConvIdx,
       r.toConvIdx,
       assignments,
       districtCentroids,
       countryCentroids,
     );
+    return [fromPos, ...wps, toPos];
+  });
+
+  // 2. FDEB: physically pull compatible roads together so corridor traffic
+  //    bundles into shared trunks instead of running parallel-but-separate.
+  const bundled: EdgePath[] = fdebBundle(initialPaths, {
+    iterations: 60,
+    subdivisions: 10,
+    initialStep: 0.4,
+    cooling: 0.95,
+    springK: 0.08,
+    compatibilityThreshold: 0.55,
+  });
+
+  const roadIds: string[] = [];
+  for (let i = 0; i < finalRoads.length; i++) {
+    const r = finalRoads[i];
+    const path = bundled[i];
+    // The endpoints of `path` are the city positions; persist only the
+    // interior subdivision points as waypoints (Road.tsx adds endpoints back).
+    const interior = path.slice(1, -1);
     const road = await prisma.road.create({
       data: {
         mapId,
@@ -824,7 +1021,7 @@ export async function terraform(mapId: string, ai: AiClient): Promise<TerraformR
         toId: r.toId,
         type: r.type,
         label: r.label,
-        ...(waypoints.length > 0 ? { waypoints: waypoints as unknown as object } : {}),
+        ...(interior.length > 0 ? { waypoints: interior as unknown as object } : {}),
       },
       select: { id: true },
     });

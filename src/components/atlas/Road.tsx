@@ -1,25 +1,23 @@
 import type { CityData, RoadData } from "@/types/atlas";
 import { ATLAS_STYLE } from "@/lib/atlas-style";
 
-// Catmull-Rom smoothing.
+// Pure linear path. Catmull-Rom was producing visually-parallel "ghost" roads
+// between bundled paths because each curve segment's control points depend on
+// the FAR endpoints of the road (not just the local segment). Two roads going
+// city A → SAME centroid A → SAME centroid B → city B would have IDENTICAL
+// waypoints but still curve apart, since their distinct city endpoints
+// influenced the Catmull-Rom control points along the entire path.
+//
+// Linear segments guarantee that any two roads sharing a (waypoint_i,
+// waypoint_{i+1}) pair render the EXACT same line for that segment → physical
+// bundling on the trunk, divergence only at the city endpoints.
 function smoothPath(points: [number, number][]): string {
   if (points.length < 2) return "";
-  if (points.length === 2) {
-    return `M ${points[0][0]} ${points[0][1]} L ${points[1][0]} ${points[1][1]}`;
+  let path = `M ${points[0][0]} ${points[0][1]}`;
+  for (let i = 1; i < points.length; i++) {
+    path += ` L ${points[i][0]} ${points[i][1]}`;
   }
-  const segs: string[] = [`M ${points[0][0]} ${points[0][1]}`];
-  for (let i = 0; i < points.length - 1; i++) {
-    const p0 = points[i - 1] ?? points[i];
-    const p1 = points[i];
-    const p2 = points[i + 1];
-    const p3 = points[i + 2] ?? p2;
-    const c1x = p1[0] + (p2[0] - p0[0]) / 6;
-    const c1y = p1[1] + (p2[1] - p0[1]) / 6;
-    const c2x = p2[0] - (p3[0] - p1[0]) / 6;
-    const c2y = p2[1] - (p3[1] - p1[1]) / 6;
-    segs.push(`C ${c1x} ${c1y}, ${c2x} ${c2y}, ${p2[0]} ${p2[1]}`);
-  }
-  return segs.join(" ");
+  return path;
 }
 
 export function Road({
