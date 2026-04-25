@@ -31,6 +31,15 @@ export function Atlas({ map }: { map: SampleMap }) {
     () => new Map(map.countries.map((c) => [c.id, c])),
     [map.countries],
   );
+  const citiesByCountry = useMemo(() => {
+    const m = new Map<string, typeof map.cities>();
+    for (const c of map.cities) {
+      const arr = m.get(c.countryId) ?? [];
+      arr.push(c);
+      m.set(c.countryId, arr);
+    }
+    return m;
+  }, [map.cities]);
   const selectedCity = selectedCityId ? cityById.get(selectedCityId) ?? null : null;
   const selectedCountry = selectedCity ? countryById.get(selectedCity.countryId) ?? null : null;
 
@@ -78,7 +87,12 @@ export function Atlas({ map }: { map: SampleMap }) {
           <MapBackdrop width={width} height={height} />
           <Sea width={width} height={height} color={map.sea.color} />
           {map.countries.map((c) => (
-            <Country key={c.id} data={c} scale={scale} />
+            <Country
+              key={c.id}
+              data={c}
+              scale={scale}
+              cities={citiesByCountry.get(c.id) ?? []}
+            />
           ))}
           {map.rivers.map((r) => (
             <River key={r.id} data={r} />

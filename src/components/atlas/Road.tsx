@@ -62,7 +62,8 @@ export function Road({
 
   return (
     <g data-road-id={data.id} pointerEvents="none">
-      {/* No casing — single solid stroke. */}
+      {/* No casing — single solid stroke. vector-effect keeps stroke width
+          constant on screen regardless of the SVG zoom transform. */}
       <path
         d={d}
         fill="none"
@@ -71,6 +72,7 @@ export function Road({
         strokeLinecap="round"
         strokeLinejoin="round"
         opacity={style.fill.opacity}
+        vectorEffect="non-scaling-stroke"
       />
 
       {/* Number badge — inverse-scaled so it stays a constant size. */}

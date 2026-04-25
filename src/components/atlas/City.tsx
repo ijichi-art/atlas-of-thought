@@ -1,6 +1,12 @@
 import type { CityData } from "@/types/atlas";
 import { ATLAS_STYLE } from "@/lib/atlas-style";
 
+// City pins are drawn at constant on-screen size: we wrap them in an
+// inverse-scale transform so that as the user zooms in, the pin doesn't
+// inflate. The same wrapping handles the selection halo.
+//
+// Pin geometry (radii, stroke widths) is in atlas-style.ts.
+
 export function City({
   data,
   selected,
@@ -29,44 +35,51 @@ export function City({
       }}
       className="cursor-pointer"
     >
-      {/* Selection halo */}
-      {selected && (
-        <circle
-          cx={cx}
-          cy={cy}
-          r={pin.outerR + ATLAS_STYLE.cityPin.selectionHaloPad}
-          fill={ATLAS_STYLE.cityPin.selectionHaloColor}
-          opacity={ATLAS_STYLE.cityPin.selectionHaloOpacity}
-        />
-      )}
+      {/* Inverse-scaled pin group: shapes drawn at origin, group translated +
+          scaled to keep on-screen size constant across zoom levels. */}
+      <g transform={`translate(${cx} ${cy}) scale(${inv})`}>
+        {selected && (
+          <circle
+            cx={0}
+            cy={0}
+            r={pin.outerR + ATLAS_STYLE.cityPin.selectionHaloPad}
+            fill={ATLAS_STYLE.cityPin.selectionHaloColor}
+            opacity={ATLAS_STYLE.cityPin.selectionHaloOpacity}
+          />
+        )}
 
-      {/* Pin */}
-      {isCapital ? (
-        <g filter={pin.shadow ? "url(#pin-shadow)" : undefined}>
-          <circle
-            cx={cx}
-            cy={cy}
-            r={pin.outerR}
-            fill={pin.fillOuter}
-            stroke={pin.strokeColor}
-            strokeWidth={pin.strokeWidth}
-          />
-          <circle cx={cx} cy={cy} r={ATLAS_STYLE.cityPin.capital.innerR} fill={ATLAS_STYLE.cityPin.capital.fillInner} />
-        </g>
-      ) : isCity ? (
-        <g filter={pin.shadow ? "url(#pin-shadow)" : undefined}>
-          <circle
-            cx={cx}
-            cy={cy}
-            r={pin.outerR}
-            fill={pin.fillOuter}
-            stroke={pin.strokeColor}
-            strokeWidth={pin.strokeWidth}
-          />
-        </g>
-      ) : (
-        <circle cx={cx} cy={cy} r={pin.outerR} fill={pin.fillOuter} />
-      )}
+        {isCapital ? (
+          <g filter={pin.shadow ? "url(#pin-shadow)" : undefined}>
+            <circle
+              cx={0}
+              cy={0}
+              r={pin.outerR}
+              fill={pin.fillOuter}
+              stroke={pin.strokeColor}
+              strokeWidth={pin.strokeWidth}
+            />
+            <circle
+              cx={0}
+              cy={0}
+              r={ATLAS_STYLE.cityPin.capital.innerR}
+              fill={ATLAS_STYLE.cityPin.capital.fillInner}
+            />
+          </g>
+        ) : isCity ? (
+          <g filter={pin.shadow ? "url(#pin-shadow)" : undefined}>
+            <circle
+              cx={0}
+              cy={0}
+              r={pin.outerR}
+              fill={pin.fillOuter}
+              stroke={pin.strokeColor}
+              strokeWidth={pin.strokeWidth}
+            />
+          </g>
+        ) : (
+          <circle cx={0} cy={0} r={pin.outerR} fill={pin.fillOuter} />
+        )}
+      </g>
 
       {/* Label — inverse-scaled so on-screen size stays constant. */}
       {showLabel && (

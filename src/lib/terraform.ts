@@ -363,20 +363,20 @@ function layoutAll(
   const ciSim = forceSimulation<CityNode>(cityNodes)
     .force(
       "countryX",
-      forceX<CityNode>((d) => countryCenters[d.countryIdx][0]).strength(0.1),
+      forceX<CityNode>((d) => countryCenters[d.countryIdx][0]).strength(0.04),
     )
     .force(
       "countryY",
-      forceY<CityNode>((d) => countryCenters[d.countryIdx][1]).strength(0.1),
+      forceY<CityNode>((d) => countryCenters[d.countryIdx][1]).strength(0.04),
     )
     .force(
       "collide",
-      forceCollide<CityNode>((d) => (d.rank === "capital" ? 30 : d.rank === "city" ? 22 : 16)),
+      forceCollide<CityNode>((d) => (d.rank === "capital" ? 55 : d.rank === "city" ? 42 : 30)),
     )
-    .force("repel", forceManyBody<CityNode>().strength(-60))
+    .force("repel", forceManyBody<CityNode>().strength(-180))
     .stop();
 
-  for (let t = 0; t < 220; t++) ciSim.tick();
+  for (let t = 0; t < 260; t++) ciSim.tick();
 
   // Step 3: pull same-district cities toward district centroid
   for (let pass = 0; pass < 35; pass++) {
@@ -401,14 +401,14 @@ function layoutAll(
     }
   }
 
-  // Final relaxation with collide
+  // Final relaxation with collide (also generous so labels don't crowd)
   const ciSim2 = forceSimulation<CityNode>(cityNodes)
     .force(
       "collide",
-      forceCollide<CityNode>((d) => (d.rank === "capital" ? 28 : d.rank === "city" ? 20 : 14)),
+      forceCollide<CityNode>((d) => (d.rank === "capital" ? 50 : d.rank === "city" ? 38 : 26)),
     )
     .stop();
-  for (let t = 0; t < 80; t++) ciSim2.tick();
+  for (let t = 0; t < 100; t++) ciSim2.tick();
 
   // Recompute country centers as actual centroid of their final cities
   const cAcc: { x: number; y: number; count: number }[] = countryCenters.map(() => ({
@@ -459,8 +459,8 @@ function countryPolygonFromCities(
 ): [number, number][] {
   if (cityPoints.length === 0) return [];
   const rng = mulberry32(seed);
-  const padding = 80;
-  const irregularity = 0.18;
+  const padding = 130; // generous so biome terrain has room to show
+  const irregularity = 0.2;
 
   if (cityPoints.length === 1) {
     const [cx, cy] = cityPoints[0];

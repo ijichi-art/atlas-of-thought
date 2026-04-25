@@ -23,12 +23,29 @@ export const ATLAS_STYLE = {
     family: '"Helvetica Neue", -apple-system, system-ui, sans-serif',
   },
 
+  // ── Biome (terrain in city-less regions) ───────────────────────────────────
+  // City neighbourhoods stay cream/white; far-from-cities areas show terrain.
+  // Each country picks one biome deterministically from its name hash.
+  biome: {
+    forest: "#b8c9a8", // soft yellow-green (highland / forest feel)
+    desert: "#d4c08a", // soft yellow-brown (desert feel)
+  },
+  civil: {
+    // Per-city radial-gradient blob: white at the city, fading to transparent
+    // → reveals the biome colour underneath in city-less regions.
+    blobRadius: 110,
+    blobInnerStop: 0.0,
+    blobOuterStop: 1.0,
+    blobInnerOpacity: 1.0,
+    blobOuterOpacity: 0.0,
+  },
+
   // ── Country (land mass + name label) ───────────────────────────────────────
-  // Snazzy "Interface Map" — uniform cream land. Per-country `data.color` is
-  // ignored when `useUniformFill` is true (faithful to the source style).
+  // Snazzy "Interface Map" — uniform cream landscape near cities; biome colour
+  // shows through in empty regions via the civil-blob radial gradient.
   country: {
-    useUniformFill: true,
-    fillColor: "#f9f5ed", // landscape color from Snazzy
+    useUniformFill: false, // biome instead — fillColor below is ignored when useUniformFill=false
+    fillColor: "#f9f5ed",
     strokeColor: "#d8d2c2",
     strokeWidth: 1.0,
     haloOffsetY: 0,
