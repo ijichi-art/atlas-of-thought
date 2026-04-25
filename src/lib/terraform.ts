@@ -290,13 +290,12 @@ function layoutAll(
 
   // Step 1: country centers — start in a ring, then force-adjust using neighbor links
   const Nc = ai.countries.length;
-  const ringR = Math.min(VIEW_W, VIEW_H) * 0.32;
+  const ringR = Math.min(VIEW_W, VIEW_H) * 0.22; // tighter initial ring (was 0.32)
   const countryNodes: CountryNode[] = Array.from({ length: Nc }, (_, i) => {
     const angle = (2 * Math.PI * i) / Nc - Math.PI / 2 + (rng() - 0.5) * 0.4;
     return { i, x: CX + ringR * Math.cos(angle), y: CY + ringR * Math.sin(angle) };
   });
 
-  // Build neighbor adjacency: pull adjacent countries toward each other
   type Link = { source: CountryNode; target: CountryNode; strength: number };
   const links: Link[] = [];
   for (let i = 0; i < Nc; i++) {
@@ -309,15 +308,15 @@ function layoutAll(
   }
 
   const cSim = forceSimulation<CountryNode>(countryNodes)
-    .force("repel", forceManyBody().strength(-3000))
-    .force("center", forceCenter(CX, CY).strength(0.06))
-    .force("collide", forceCollide(170))
+    .force("repel", forceManyBody().strength(-1500)) // less aggressive (was -3000)
+    .force("center", forceCenter(CX, CY).strength(0.18)) // stronger pull to center (was 0.06)
+    .force("collide", forceCollide(140)) // smaller collision radius (was 170)
     .force("attract", () => {
       for (const l of links) {
         const dx = (l.target.x ?? 0) - (l.source.x ?? 0);
         const dy = (l.target.y ?? 0) - (l.source.y ?? 0);
         const d = Math.sqrt(dx * dx + dy * dy) || 1;
-        const f = (d - 280) * 0.05 * l.strength;
+        const f = (d - 220) * 0.06 * l.strength;
         l.source.x = (l.source.x ?? 0) + (dx / d) * f;
         l.source.y = (l.source.y ?? 0) + (dy / d) * f;
         l.target.x = (l.target.x ?? 0) - (dx / d) * f;
@@ -327,6 +326,19 @@ function layoutAll(
     .stop();
 
   for (let t = 0; t < 300; t++) cSim.tick();
+
+  // Hard cap: no country may sit further than this from the map center.
+  // Prevents one isolated country from drifting into "lonely island" territory.
+  const MAX_DIST_FROM_CENTER = 280;
+  for (const node of countryNodes) {
+    const dx = (node.x ?? CX) - CX;
+    const dy = (node.y ?? CY) - CY;
+    const d = Math.sqrt(dx * dx + dy * dy);
+    if (d > MAX_DIST_FROM_CENTER) {
+      node.x = CX + (dx / d) * MAX_DIST_FROM_CENTER;
+      node.y = CY + (dy / d) * MAX_DIST_FROM_CENTER;
+    }
+  }
 
   const countryCenters: Array<[number, number]> = countryNodes.map((n) => clamp(n.x ?? CX, n.y ?? CY, 220));
 

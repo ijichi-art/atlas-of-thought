@@ -152,24 +152,44 @@ export const ATLAS_STYLE = {
   },
 
   // ── Roads (per RoadType) ──────────────────────────────────────────────────
-  // Snazzy "Interface Map" — near-white road with light gray casing.
+  // Single solid stroke per road (no casing). All dashed styles dropped — Google
+  // Maps roads are continuous. minScale hides lower-importance roads at wide view
+  // so the map stays readable; highways are always visible (minScale 0).
   road: {
     highway: {
-      casing: { color: "#c9c9c9", width: 6 },
-      fill: { color: "#f5f5f5", width: 3.5, dash: undefined as string | undefined, opacity: 1 },
+      casing: undefined as undefined | { color: string; width: number },
+      fill: { color: "#e69138", width: 3.5, dash: undefined as string | undefined, opacity: 1 },
+      minScale: 0,
     },
     regular: {
-      casing: { color: "#d8d8d8", width: 3.8 },
-      fill: { color: "#f5f5f5", width: 2.2, dash: undefined as string | undefined, opacity: 1 },
+      casing: undefined as undefined | { color: string; width: number },
+      fill: { color: "#b0a896", width: 2.2, dash: undefined as string | undefined, opacity: 1 },
+      minScale: 0.7,
     },
     trail: {
       casing: undefined as undefined | { color: string; width: number },
-      fill: { color: "#a8a8a8", width: 1.4, dash: "4 4", opacity: 0.8 },
+      fill: { color: "#7d6a4a", width: 1.5, dash: undefined as string | undefined, opacity: 0.9 },
+      minScale: 1.5,
     },
     ferry: {
       casing: undefined as undefined | { color: string; width: number },
-      fill: { color: "#7eb8d4", width: 1.4, dash: "2 4", opacity: 0.85 },
+      fill: { color: "#3367d6", width: 1.5, dash: undefined as string | undefined, opacity: 0.9 },
+      minScale: 0.7,
     },
+  },
+
+  // ── Road number badge (Google-Maps-style highway shield) ──────────────────
+  roadNumber: {
+    fontSize: 9,
+    fontWeight: 600,
+    textColor: "#3a3a36",
+    bgFill: "#ffffff",
+    bgStroke: "#aaa",
+    bgStrokeWidth: 0.5,
+    bgWidth: 16,
+    bgHeight: 14,
+    bgRadius: 3,
+    minScale: 0.85, // don't show badges at very wide view
   },
 } as const;
 

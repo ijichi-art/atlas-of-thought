@@ -86,8 +86,8 @@ export function Atlas({ map }: { map: SampleMap }) {
           {map.mountainRanges.map((m) => (
             <MountainRange key={m.id} data={m} />
           ))}
-          {map.roads.map((r) => (
-            <Road key={r.id} data={r} cityById={cityById} />
+          {map.roads.map((r, i) => (
+            <Road key={r.id} data={r} cityById={cityById} scale={scale} number={i + 1} />
           ))}
           {map.cities.map((c) => (
             <City
