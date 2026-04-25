@@ -32,11 +32,10 @@ type ClusteredCountry = {
   nameJa?: string;
   theme: string;
   color: string;
-  conversationIds: string[];
 };
 
 type ClusteredCity = {
-  conversationId: string;
+  conversationIndex: number;
   countryIndex: number;
   topic: string;
   summary: string;
@@ -53,46 +52,62 @@ type ClusterResult = {
 async function clusterWithAI(convs: ConvInput[], ai: AiClient): Promise<ClusterResult> {
   const system = `You are organizing a "map of thought" — a geographic visualization of AI conversations.
 Group the given conversations into thematic clusters that will become countries on a map.
-Respond only with valid JSON, no markdown fences.`;
+Respond only with valid JSON, no markdown fences, no commentary.`;
 
   const convList = convs
-    .map((c, i) => `[${i}] id="${c.id}" title="${c.title ?? "(untitled)"}" preview="${c.preview}"`)
+    .map((c, i) => `[${i}] title="${c.title ?? "(untitled)"}" preview="${c.preview}"`)
     .join("\n");
 
   const colorList = COUNTRY_COLORS.join(", ");
+  const maxClusters = Math.min(7, Math.max(3, Math.ceil(convs.length / 3)));
 
-  const user = `Conversations (${convs.length} total):
+  const user = `Conversations (${convs.length} total). Each is identified by its index [N]:
 ${convList}
 
 Task:
-1. Group them into 3-${Math.min(7, convs.length)} thematic clusters.
-2. Give each cluster a Latin-inspired single-word name (like "Architectura", "Cognitio", "Machina") and an optional Japanese word.
-3. For each conversation, extract a short topic phrase (4-8 words) and a 1-sentence summary.
-4. Assign ranks: the longest/richest conversation in a cluster is "capital", medium ones "city", short ones "town".
-5. Pick a color for each cluster from: ${colorList}
+1. Group ALL ${convs.length} conversations into 3-${maxClusters} thematic clusters (countries).
+2. Give each country a Latin-inspired single-word name (like "Architectura", "Cognitio", "Machina") and an optional Japanese word.
+3. For EACH conversation, output one city entry with: its index, the country index it belongs to, a 4-8 word topic, a 1-sentence summary, and a rank.
+4. Ranks: longest/most substantial conversation in a country = "capital", medium = "city", short = "town".
+5. Pick a color for each country from: ${colorList}
 
-Respond with this JSON (no other text):
+CRITICAL: every conversation index from 0 to ${convs.length - 1} MUST appear exactly once in the cities array.
+
+Respond with ONLY this JSON shape (no other text, no fences):
 {
   "countries": [
-    { "name": "...", "nameJa": "...", "theme": "...", "color": "...", "conversationIds": ["id1", "id2"] }
+    { "name": "Architectura", "nameJa": "建築", "theme": "system design", "color": "#c4d4be" }
   ],
   "cities": [
-    { "conversationId": "id1", "countryIndex": 0, "topic": "...", "summary": "...", "rank": "capital|city|town" }
+    { "conversationIndex": 0, "countryIndex": 0, "topic": "short topic phrase", "summary": "one sentence summary", "rank": "capital" }
   ]
 }`;
 
   let raw = "";
-  for await (const chunk of ai.stream({ system, messages: [{ role: "user", content: user }], maxTokens: 4096 })) {
+  for await (const chunk of ai.stream({ system, messages: [{ role: "user", content: user }], maxTokens: 8192 })) {
     raw += chunk;
   }
 
-  // Extract JSON from the response (handle any accidental markdown fences).
   const jsonMatch = raw.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error("AI response did not contain valid JSON.");
+  if (!jsonMatch) {
+    throw new Error(`AI response did not contain JSON. Got: ${raw.slice(0, 200)}…`);
+  }
 
-  const parsed = JSON.parse(jsonMatch[0]) as ClusterResult;
+  let parsed: ClusterResult;
+  try {
+    parsed = JSON.parse(jsonMatch[0]) as ClusterResult;
+  } catch (err) {
+    throw new Error(`AI returned invalid JSON: ${err instanceof Error ? err.message : err}`);
+  }
+
   if (!Array.isArray(parsed.countries) || !Array.isArray(parsed.cities)) {
     throw new Error("AI response JSON missing countries or cities arrays.");
+  }
+  if (parsed.countries.length === 0) {
+    throw new Error("AI returned 0 countries.");
+  }
+  if (parsed.cities.length === 0) {
+    throw new Error(`AI returned 0 cities for ${convs.length} conversations.`);
   }
   return parsed;
 }
@@ -201,9 +216,17 @@ export async function terraform(mapId: string, ai: AiClient): Promise<TerraformR
 
   const { countries: rawCountries, cities: rawCities } = await clusterWithAI(inputs, ai);
 
-  // Validate that all conversation IDs in the response are real.
-  const validIds = new Set(inputs.map((c) => c.id));
-  const validCities = rawCities.filter((city) => validIds.has(city.conversationId));
+  // Resolve indices → real conversation IDs. Drop entries with out-of-range indices.
+  type ResolvedCity = Omit<typeof rawCities[number], "conversationIndex"> & { conversationId: string };
+  const validCities: ResolvedCity[] = [];
+  const seenConvIndexes = new Set<number>();
+  for (const c of rawCities) {
+    const idx = Number(c.conversationIndex);
+    if (!Number.isInteger(idx) || idx < 0 || idx >= inputs.length) continue;
+    if (seenConvIndexes.has(idx)) continue; // dedupe — one city per conversation
+    seenConvIndexes.add(idx);
+    validCities.push({ ...c, conversationId: inputs[idx].id });
+  }
 
   // ── Write to DB (wipe any existing auto-generated geography first) ──────────
   await prisma.$transaction([
