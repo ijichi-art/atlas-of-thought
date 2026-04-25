@@ -169,6 +169,7 @@ Output JSON only, this exact shape:
     system,
     messages: [{ role: "user", content: user }],
     maxTokens: 16384,
+    jsonMode: true,
   })) {
     raw += chunk;
   }

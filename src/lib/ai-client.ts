@@ -10,6 +10,9 @@ export type AiChatParams = {
   system: string;
   messages: { role: "user" | "assistant"; content: string }[];
   maxTokens?: number;
+  // When true, request structured JSON output (OpenAI / DeepSeek json_object mode).
+  // Anthropic doesn't have a flag — the prompt itself must say "JSON only".
+  jsonMode?: boolean;
 };
 
 export type AiClient = {
@@ -47,12 +50,13 @@ export async function getAiClient(userId: string): Promise<AiClient | null> {
   return {
     provider,
     model,
-    async *stream({ system, messages, maxTokens = 1024 }) {
+    async *stream({ system, messages, maxTokens = 1024, jsonMode = false }) {
       const s = await oai.chat.completions.create({
         model,
         max_tokens: maxTokens,
         stream: true,
         messages: [{ role: "system", content: system }, ...messages],
+        ...(jsonMode ? { response_format: { type: "json_object" as const } } : {}),
       });
       for await (const chunk of s) {
         const text = chunk.choices[0]?.delta?.content;
