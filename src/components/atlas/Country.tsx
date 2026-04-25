@@ -33,21 +33,24 @@ export function Country({ data, scale }: { data: CountryData; scale: number }) {
   const [cx, cy] = polygonCentroid(data.polygon);
   const inv = 1 / scale;
   const path = smoothPath(data.polygon);
+  const fillColor = T.useUniformFill ? T.fillColor : data.color;
 
   return (
     <g data-country-id={data.id}>
-      {/* Soft halo behind the country */}
-      <path
-        d={path}
-        fill={data.color}
-        opacity={T.haloOpacity}
-        transform={`translate(0 ${T.haloOffsetY})`}
-        filter="url(#country-inset)"
-      />
+      {/* Soft halo behind the country (no-op when haloOpacity=0) */}
+      {T.haloOpacity > 0 && (
+        <path
+          d={path}
+          fill={fillColor}
+          opacity={T.haloOpacity}
+          transform={`translate(0 ${T.haloOffsetY})`}
+          filter="url(#country-inset)"
+        />
+      )}
       {/* Main land mass */}
       <path
         d={path}
-        fill={data.color}
+        fill={fillColor}
         stroke={T.strokeColor}
         strokeWidth={T.strokeWidth}
         strokeLinejoin="round"

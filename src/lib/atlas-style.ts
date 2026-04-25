@@ -4,9 +4,10 @@
 
 export const ATLAS_STYLE = {
   // ── Sea / map background ───────────────────────────────────────────────────
+  // Snazzy "Interface Map" — soft cyan water.
   sea: {
-    color: "#dde5ec",
-    grainOpacity: 0.6,
+    color: "#aee0f4",
+    grainOpacity: 0.35,
     grainBaseFreq: 0.9,
   },
 
@@ -23,26 +24,30 @@ export const ATLAS_STYLE = {
   },
 
   // ── Country (land mass + name label) ───────────────────────────────────────
+  // Snazzy "Interface Map" — uniform cream land. Per-country `data.color` is
+  // ignored when `useUniformFill` is true (faithful to the source style).
   country: {
-    strokeColor: "#9aa3aa",
-    strokeWidth: 1.1,
-    haloOffsetY: 4,
-    haloOpacity: 0.4,
+    useUniformFill: true,
+    fillColor: "#f9f5ed", // landscape color from Snazzy
+    strokeColor: "#d8d2c2",
+    strokeWidth: 1.0,
+    haloOffsetY: 0,
+    haloOpacity: 0,
     label: {
       fontSize: 20,
       fontWeight: 500,
       letterSpacing: 5,
-      color: "#3a3a36",
-      haloColor: "#f5f3ef",
-      haloWidth: 5,
-      opacity: 0.78,
+      color: "#878787",
+      haloColor: "#f9f5ed",
+      haloWidth: 0, // Snazzy: labels.text.stroke = off
+      opacity: 1,
       uppercase: true,
       jaFontSize: 13,
       jaFontWeight: 400,
-      jaColor: "#6a655e",
+      jaColor: "#a0a0a0",
       jaLetterSpacing: 3,
       jaOffsetY: 20,
-      jaHaloWidth: 4,
+      jaHaloWidth: 0,
     },
   },
 
@@ -52,15 +57,15 @@ export const ATLAS_STYLE = {
       fontSize: 11,
       fontWeight: 500,
       letterSpacing: 2.5,
-      color: "#736a5e",
-      haloColor: "#f5f3ef",
-      haloWidth: 4,
+      color: "#878787",
+      haloColor: "#f9f5ed",
+      haloWidth: 0,
       uppercase: true,
       jaFontSize: 9,
-      jaColor: "#8a8175",
+      jaColor: "#a0a0a0",
       jaLetterSpacing: 2,
       jaOffsetY: 11,
-      jaHaloWidth: 3,
+      jaHaloWidth: 0,
       yOffsetPx: -28, // unscaled pixels above district centroid
     },
     fadeInScale: { min: 1.2, max: 1.6 },
@@ -97,71 +102,73 @@ export const ATLAS_STYLE = {
   },
 
   // ── Cities: labels (rank-dependent type) ───────────────────────────────────
+  // Snazzy "Interface Map" — all labels #878787, no stroke.
   cityLabel: {
     capital: {
       fontSize: 13,
       fontWeight: 700,
       letterSpacing: 0.3,
-      color: "#1f1d1a",
-      haloColor: "#f5f3ef",
-      haloWidth: 4,
+      color: "#5e5e5e",
+      haloColor: "#f9f5ed",
+      haloWidth: 0,
       labelDy: 18,
       minScale: 0,
       showJa: true,
       jaFontSizeRatio: 0.78,
       jaFontWeight: 400,
-      jaColor: "#5a5650",
-      jaHaloWidth: 3.5,
+      jaColor: "#a0a0a0",
+      jaHaloWidth: 0,
     },
     city: {
       fontSize: 11,
       fontWeight: 600,
       letterSpacing: 0,
-      color: "#1f1d1a",
-      haloColor: "#f5f3ef",
-      haloWidth: 4,
+      color: "#878787",
+      haloColor: "#f9f5ed",
+      haloWidth: 0,
       labelDy: 14,
       minScale: 0.55,
       showJa: true,
       jaFontSizeRatio: 0.78,
       jaFontWeight: 400,
-      jaColor: "#5a5650",
-      jaHaloWidth: 3.5,
+      jaColor: "#a0a0a0",
+      jaHaloWidth: 0,
     },
     town: {
       fontSize: 9.5,
       fontWeight: 500,
       letterSpacing: 0,
-      color: "#1f1d1a",
-      haloColor: "#f5f3ef",
-      haloWidth: 4,
+      color: "#878787",
+      haloColor: "#f9f5ed",
+      haloWidth: 0,
       labelDy: 11,
       minScale: 1.0,
       showJa: false,
       jaFontSizeRatio: 0.78,
       jaFontWeight: 400,
-      jaColor: "#5a5650",
-      jaHaloWidth: 3.5,
+      jaColor: "#a0a0a0",
+      jaHaloWidth: 0,
     },
   },
 
   // ── Roads (per RoadType) ──────────────────────────────────────────────────
+  // Snazzy "Interface Map" — near-white road with light gray casing.
   road: {
     highway: {
-      casing: { color: "#e69138", width: 7 },
-      fill: { color: "#fbe2b6", width: 4, dash: undefined as string | undefined, opacity: 1 },
+      casing: { color: "#c9c9c9", width: 6 },
+      fill: { color: "#f5f5f5", width: 3.5, dash: undefined as string | undefined, opacity: 1 },
     },
     regular: {
-      casing: { color: "#cfcbc1", width: 4.5 },
-      fill: { color: "#ffffff", width: 2.5, dash: undefined as string | undefined, opacity: 1 },
+      casing: { color: "#d8d8d8", width: 3.8 },
+      fill: { color: "#f5f5f5", width: 2.2, dash: undefined as string | undefined, opacity: 1 },
     },
     trail: {
       casing: undefined as undefined | { color: string; width: number },
-      fill: { color: "#7d6a4a", width: 1.6, dash: "5 4", opacity: 0.85 },
+      fill: { color: "#a8a8a8", width: 1.4, dash: "4 4", opacity: 0.8 },
     },
     ferry: {
       casing: undefined as undefined | { color: string; width: number },
-      fill: { color: "#3367d6", width: 1.6, dash: "2 5", opacity: 0.85 },
+      fill: { color: "#7eb8d4", width: 1.4, dash: "2 4", opacity: 0.85 },
     },
   },
 } as const;
