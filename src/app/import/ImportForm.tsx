@@ -20,71 +20,126 @@ const SOURCE_OPTIONS = [
   { value: "paste", label: "Pasted transcript" },
 ];
 
+const ACCEPTED_EXT = /\.(json|jsonl|txt)$/i;
+
 export function ImportForm({ maps }: { maps: MapMeta[] }) {
   const [mode, setMode] = useState<"file" | "text">("file");
   const [dragging, setDragging] = useState(false);
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [text, setText] = useState("");
   const [source, setSource] = useState("auto");
   const [title, setTitle] = useState("");
   const [mapId, setMapId] = useState(maps[0]?.id ?? "");
   const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const reset = () => {
-    setFile(null);
+    setFiles([]);
     setText("");
     setTitle("");
     setSource("auto");
     setStatus("idle");
+    setProgress(null);
     setResult(null);
     setErrorMsg("");
+  };
+
+  const addFiles = (incoming: FileList | File[] | null) => {
+    if (!incoming) return;
+    const arr = Array.from(incoming).filter((f) => ACCEPTED_EXT.test(f.name));
+    if (arr.length === 0) return;
+    // Dedupe by name+size against existing
+    const seen = new Set(files.map((f) => `${f.name}::${f.size}`));
+    const next = [...files];
+    for (const f of arr) {
+      const key = `${f.name}::${f.size}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        next.push(f);
+      }
+    }
+    setFiles(next);
+  };
+
+  const removeFile = (idx: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== idx));
   };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragging(false);
-    const dropped = e.dataTransfer.files[0];
-    if (dropped) setFile(dropped);
+    addFiles(e.dataTransfer.files);
   };
+
+  async function importOne(file: File | null, textBody: string): Promise<ImportResult> {
+    const form = new FormData();
+    form.set("mapId", mapId);
+    form.set("source", source);
+    if (title.trim()) form.set("title", title.trim());
+    if (file) form.set("file", file);
+    else form.set("text", textBody);
+
+    const res = await fetch("/api/import", { method: "POST", body: form });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? "Import failed.");
+    return data as ImportResult;
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!mapId) return;
 
-    const hasContent = mode === "file" ? !!file : !!text.trim();
-    if (!hasContent) {
-      setErrorMsg(mode === "file" ? "Please select a file." : "Please enter some text.");
+    if (mode === "file" && files.length === 0) {
+      setErrorMsg("Please select at least one file.");
+      return;
+    }
+    if (mode === "text" && !text.trim()) {
+      setErrorMsg("Please enter some text.");
       return;
     }
 
     setStatus("loading");
     setErrorMsg("");
 
-    const form = new FormData();
-    form.set("mapId", mapId);
-    form.set("source", source);
-    if (title.trim()) form.set("title", title.trim());
-    if (mode === "file" && file) {
-      form.set("file", file);
-    } else {
-      form.set("text", text);
-    }
+    const totals: ImportResult = { imported: 0, skipped: 0, issues: [], estimatedTokens: 0 };
 
     try {
-      const res = await fetch("/api/import", { method: "POST", body: form });
-      const data = await res.json();
-      if (!res.ok) {
-        setErrorMsg(data.error ?? "Import failed.");
-        setStatus("error");
-        return;
+      if (mode === "text") {
+        setProgress({ current: 0, total: 1 });
+        const r = await importOne(null, text);
+        totals.imported += r.imported;
+        totals.skipped += r.skipped;
+        totals.estimatedTokens += r.estimatedTokens;
+        totals.issues.push(...r.issues);
+        setProgress({ current: 1, total: 1 });
+      } else {
+        setProgress({ current: 0, total: files.length });
+        for (let i = 0; i < files.length; i++) {
+          const f = files[i];
+          try {
+            const r = await importOne(f, "");
+            totals.imported += r.imported;
+            totals.skipped += r.skipped;
+            totals.estimatedTokens += r.estimatedTokens;
+            totals.issues.push(...r.issues);
+          } catch (err) {
+            totals.issues.push({
+              level: "error",
+              code: "file_failed",
+              message: `${f.name}: ${err instanceof Error ? err.message : "failed"}`,
+            });
+          }
+          setProgress({ current: i + 1, total: files.length });
+        }
       }
-      setResult(data as ImportResult);
+
+      setResult(totals);
       setStatus("done");
-    } catch {
-      setErrorMsg("Network error. Please try again.");
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Network error. Please try again.");
       setStatus("error");
     }
   };
@@ -99,7 +154,7 @@ export function ImportForm({ maps }: { maps: MapMeta[] }) {
           <Stat label="~Tokens" value={result.estimatedTokens.toLocaleString()} />
         </div>
         {result.issues.length > 0 && (
-          <ul className="text-xs text-stone-500 space-y-1 border-t border-stone-100 pt-4">
+          <ul className="text-xs text-stone-500 space-y-1 border-t border-stone-100 pt-4 max-h-48 overflow-y-auto">
             {result.issues.map((issue, i) => (
               <li key={i} className={issue.level === "error" ? "text-red-600" : ""}>
                 {issue.level === "warning" ? "⚠ " : "✕ "}
@@ -162,46 +217,71 @@ export function ImportForm({ maps }: { maps: MapMeta[] }) {
                   : "border-transparent text-stone-400 hover:text-stone-600"
               }`}
             >
-              {m === "file" ? "Upload file" : "Paste text"}
+              {m === "file" ? "Upload files" : "Paste text"}
             </button>
           ))}
         </div>
 
         {mode === "file" ? (
-          <div
-            onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={handleDrop}
-            onClick={() => fileInputRef.current?.click()}
-            className={`cursor-pointer border-2 border-dashed rounded-lg p-10 text-center transition-colors ${
-              dragging
-                ? "border-stone-400 bg-stone-100"
-                : "border-stone-200 hover:border-stone-300 hover:bg-stone-50"
-            }`}
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".json,.jsonl,.txt"
-              className="hidden"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            />
-            {file ? (
-              <div className="space-y-1">
-                <div className="text-sm font-medium text-stone-700">{file.name}</div>
-                <div className="text-xs text-stone-400">{(file.size / 1024).toFixed(1)} KB</div>
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); setFile(null); }}
-                  className="text-xs text-stone-400 hover:text-stone-600 underline"
-                >
-                  Remove
-                </button>
-              </div>
-            ) : (
+          <div className="space-y-3">
+            <div
+              onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+              className={`cursor-pointer border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
+                dragging
+                  ? "border-stone-400 bg-stone-100"
+                  : "border-stone-200 hover:border-stone-300 hover:bg-stone-50"
+              }`}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept=".json,.jsonl,.txt"
+                className="hidden"
+                onChange={(e) => addFiles(e.target.files)}
+              />
               <div className="text-stone-400 text-sm space-y-1">
-                <div>Drop a file here, or click to browse</div>
-                <div className="text-xs">.json · .jsonl · .txt</div>
+                <div>Drop files here, or click to browse</div>
+                <div className="text-xs">.json · .jsonl · .txt — multiple allowed</div>
+              </div>
+            </div>
+
+            {files.length > 0 && (
+              <div className="border border-stone-200 rounded">
+                <div className="px-3 py-2 text-xs text-stone-500 bg-stone-50 border-b border-stone-200 flex items-center justify-between">
+                  <span>
+                    {files.length} file{files.length === 1 ? "" : "s"} ·{" "}
+                    {(files.reduce((s, f) => s + f.size, 0) / 1024 / 1024).toFixed(2)} MB
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setFiles([])}
+                    className="text-stone-400 hover:text-stone-700"
+                  >
+                    Clear all
+                  </button>
+                </div>
+                <ul className="max-h-56 overflow-y-auto divide-y divide-stone-100">
+                  {files.map((f, i) => (
+                    <li key={i} className="flex items-center justify-between px-3 py-2 text-sm">
+                      <span className="truncate text-stone-700 mr-3">{f.name}</span>
+                      <span className="flex items-center gap-3 shrink-0">
+                        <span className="text-xs text-stone-400">{(f.size / 1024).toFixed(1)} KB</span>
+                        <button
+                          type="button"
+                          onClick={() => removeFile(i)}
+                          className="text-stone-300 hover:text-red-500"
+                          aria-label="Remove"
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
           </div>
@@ -250,16 +330,18 @@ export function ImportForm({ maps }: { maps: MapMeta[] }) {
         </div>
       )}
 
-      {errorMsg && (
-        <p className="text-sm text-red-600">{errorMsg}</p>
-      )}
+      {errorMsg && <p className="text-sm text-red-600">{errorMsg}</p>}
 
       <button
         type="submit"
         disabled={status === "loading"}
         className="w-full py-2.5 bg-stone-800 text-stone-50 text-sm rounded hover:bg-stone-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
       >
-        {status === "loading" ? "Importing…" : "Import"}
+        {status === "loading" && progress
+          ? `Importing ${progress.current}/${progress.total}…`
+          : status === "loading"
+            ? "Importing…"
+            : `Import${files.length > 1 ? ` ${files.length} files` : ""}`}
       </button>
     </form>
   );
