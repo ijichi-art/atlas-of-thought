@@ -1,27 +1,5 @@
 import type { CityData, RoadData } from "@/types/atlas";
-
-const STYLE: Record<
-  RoadData["type"],
-  {
-    casing?: { color: string; width: number };
-    fill: { color: string; width: number; dash?: string; opacity?: number };
-  }
-> = {
-  highway: {
-    casing: { color: "#e69138", width: 7 },
-    fill: { color: "#fbe2b6", width: 4 },
-  },
-  regular: {
-    casing: { color: "#cfcbc1", width: 4.5 },
-    fill: { color: "#ffffff", width: 2.5 },
-  },
-  trail: {
-    fill: { color: "#7d6a4a", width: 1.6, dash: "5 4", opacity: 0.85 },
-  },
-  ferry: {
-    fill: { color: "#3367d6", width: 1.6, dash: "2 5", opacity: 0.85 },
-  },
-};
+import { ATLAS_STYLE } from "@/lib/atlas-style";
 
 // Catmull-Rom smoothing — same family as the river smoother.
 function smoothPath(points: [number, number][]): string {
@@ -60,7 +38,7 @@ export function Road({
     to.position,
   ];
   const d = smoothPath(points);
-  const style = STYLE[data.type];
+  const style = ATLAS_STYLE.road[data.type];
 
   return (
     <g data-road-id={data.id} pointerEvents="none">

@@ -15,9 +15,10 @@ import { Road } from "./Road";
 import { Legend } from "./Legend";
 import { CityDetailPanel } from "./CityDetailPanel";
 import { Districts } from "./Districts";
+import { ATLAS_STYLE } from "@/lib/atlas-style";
 
-const MIN_SCALE = 0.4;
-const MAX_SCALE = 12;
+const MIN_SCALE = ATLAS_STYLE.zoom.min;
+const MAX_SCALE = ATLAS_STYLE.zoom.max;
 
 export function Atlas({ map }: { map: SampleMap }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -64,7 +65,7 @@ export function Atlas({ map }: { map: SampleMap }) {
   const { width, height } = map.viewBox;
 
   return (
-    <div className="relative w-full h-full bg-[#dde5ec]">
+    <div className="relative w-full h-full" style={{ backgroundColor: ATLAS_STYLE.sea.color }}>
       <svg
         ref={svgRef}
         viewBox={`0 0 ${width} ${height}`}

@@ -2,11 +2,12 @@
 
 import { useMemo } from "react";
 import type { CityData } from "@/types/atlas";
+import { ATLAS_STYLE } from "@/lib/atlas-style";
 
-// Render district labels above their cities. Positioned at the centroid of
-// all cities sharing the same (countryId, district). Visible only at
-// medium-to-high zoom — fade in around 1.4×.
+// District labels — centered on the centroid of all cities sharing the same
+// (countryId, district), inverse-scaled, fade in at mid zoom.
 export function Districts({ cities, scale }: { cities: CityData[]; scale: number }) {
+  const T = ATLAS_STYLE.district;
   const districts = useMemo(() => {
     const groups = new Map<
       string,
@@ -27,54 +28,56 @@ export function Districts({ cities, scale }: { cities: CityData[]; scale: number
       g.count++;
       groups.set(key, g);
     }
-    return Array.from(groups.values())
-      .filter((g) => g.count >= 1)
-      .map((g) => ({
-        name: g.name,
-        nameJa: g.nameJa,
-        x: g.xs.reduce((a, b) => a + b, 0) / g.xs.length,
-        y: g.ys.reduce((a, b) => a + b, 0) / g.ys.length,
-      }));
+    return Array.from(groups.values()).map((g) => ({
+      name: g.name,
+      nameJa: g.nameJa,
+      x: g.xs.reduce((a, b) => a + b, 0) / g.xs.length,
+      y: g.ys.reduce((a, b) => a + b, 0) / g.ys.length,
+    }));
   }, [cities]);
 
   const inv = 1 / scale;
-  // Fade in between 1.2× and 1.6× zoom
-  const opacity = Math.min(1, Math.max(0, (scale - 1.2) / 0.4));
+  const opacity = Math.min(
+    1,
+    Math.max(0, (scale - T.fadeInScale.min) / (T.fadeInScale.max - T.fadeInScale.min)),
+  );
   if (opacity <= 0) return null;
+
+  const lab = T.label;
 
   return (
     <g style={{ opacity }} pointerEvents="none">
       {districts.map((d, i) => (
-        <g key={i} transform={`translate(${d.x} ${d.y - 28 * inv}) scale(${inv})`}>
+        <g key={i} transform={`translate(${d.x} ${d.y + lab.yOffsetPx * inv}) scale(${inv})`}>
           <text
             textAnchor="middle"
-            fontFamily='"Helvetica Neue", -apple-system, system-ui, sans-serif'
-            fontSize={11}
-            fontWeight={500}
-            fill="#736a5e"
-            letterSpacing={2.5}
+            fontFamily={ATLAS_STYLE.font.family}
+            fontSize={lab.fontSize}
+            fontWeight={lab.fontWeight}
+            fill={lab.color}
+            letterSpacing={lab.letterSpacing}
             style={{
               paintOrder: "stroke fill",
-              stroke: "#f5f3ef",
-              strokeWidth: 4,
+              stroke: lab.haloColor,
+              strokeWidth: lab.haloWidth,
               strokeLinejoin: "round",
-              textTransform: "uppercase",
+              textTransform: lab.uppercase ? "uppercase" : "none",
             }}
           >
-            {d.name.toUpperCase()}
+            {lab.uppercase ? d.name.toUpperCase() : d.name}
           </text>
           {d.nameJa && (
             <text
               textAnchor="middle"
-              y={11}
-              fontFamily='"Helvetica Neue", -apple-system, system-ui, sans-serif'
-              fontSize={9}
-              fill="#8a8175"
-              letterSpacing={2}
+              y={lab.jaOffsetY}
+              fontFamily={ATLAS_STYLE.font.family}
+              fontSize={lab.jaFontSize}
+              fill={lab.jaColor}
+              letterSpacing={lab.jaLetterSpacing}
               style={{
                 paintOrder: "stroke fill",
-                stroke: "#f5f3ef",
-                strokeWidth: 3,
+                stroke: lab.haloColor,
+                strokeWidth: lab.jaHaloWidth,
                 strokeLinejoin: "round",
               }}
             >
