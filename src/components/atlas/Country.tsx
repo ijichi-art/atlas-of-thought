@@ -8,9 +8,10 @@ function polygonCentroid(points: [number, number][]): [number, number] {
   return [sx / points.length, sy / points.length];
 }
 
-export function Country({ data }: { data: CountryData }) {
+export function Country({ data, scale }: { data: CountryData; scale: number }) {
   const path = data.polygon.map(([x, y]) => `${x},${y}`).join(" ");
   const [cx, cy] = polygonCentroid(data.polygon);
+  const inv = 1 / scale;
 
   return (
     <g data-country-id={data.id}>
@@ -22,12 +23,12 @@ export function Country({ data }: { data: CountryData }) {
         strokeWidth={0.8}
         strokeLinejoin="round"
       />
-      {/* Country label — uppercase, wide letter-spacing, muted gray */}
-      <g transform={`translate(${cx} ${cy})`} pointerEvents="none">
+      {/* Country label — inverse-scaled to keep on-screen size constant across zoom */}
+      <g transform={`translate(${cx} ${cy}) scale(${inv})`} pointerEvents="none">
         <text
           textAnchor="middle"
           fontFamily="system-ui, -apple-system, 'Helvetica Neue', sans-serif"
-          fontSize={14}
+          fontSize={13}
           fontWeight={500}
           fill="#7a7166"
           letterSpacing={4}
@@ -38,7 +39,7 @@ export function Country({ data }: { data: CountryData }) {
         {data.nameJa && (
           <text
             textAnchor="middle"
-            y={16}
+            y={15}
             fontFamily="system-ui, -apple-system, sans-serif"
             fontSize={10}
             fill="#9c9388"

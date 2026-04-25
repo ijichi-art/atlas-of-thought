@@ -76,7 +76,7 @@ export function Atlas({ map }: { map: SampleMap }) {
           <MapBackdrop width={width} height={height} />
           <Sea width={width} height={height} color={map.sea.color} />
           {map.countries.map((c) => (
-            <Country key={c.id} data={c} />
+            <Country key={c.id} data={c} scale={scale} />
           ))}
           {map.rivers.map((r) => (
             <River key={r.id} data={r} />
@@ -93,6 +93,7 @@ export function Atlas({ map }: { map: SampleMap }) {
               data={c}
               selected={selectedCityId === c.id}
               onSelect={setSelectedCityId}
+              scale={scale}
             />
           ))}
         </g>
