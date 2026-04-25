@@ -201,12 +201,13 @@ export type TerraformResult = {
 };
 
 export async function terraform(mapId: string, ai: AiClient): Promise<TerraformResult> {
-  // Load all unplaced conversations (not yet linked to any city).
+  // Load ALL importable conversations on the map. Terraform is a full rebuild
+  // (it wipes existing countries/cities/roads below), so even already-placed
+  // conversations need to be re-fed to the AI for re-clustering.
   const allConvs = await prisma.conversation.findMany({
     where: {
       mapId,
       source: { not: "native" }, // skip chat-started conversations
-      cities: { none: {} },      // not yet placed on any city
     },
     select: {
       id: true,
@@ -218,6 +219,7 @@ export async function terraform(mapId: string, ai: AiClient): Promise<TerraformR
         select: { text: true },
       },
     },
+    orderBy: { importedAt: "desc" },
     take: 50, // process up to 50 per run
   });
 
