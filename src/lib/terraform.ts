@@ -495,6 +495,108 @@ function countryPolygonFromCities(
   return detailed;
 }
 
+// ── Road pruning ──────────────────────────────────────────────────────────────
+//
+// Real road networks don't have 3 parallel edges leaving the same town.
+// This filter enforces:
+//   1. dedupe (one edge per unordered city pair, prefer the more important type)
+//   2. cap each city's degree at MAX_DEGREE
+//   3. drop edges that point in nearly the same direction as a stronger
+//      already-kept edge from the same city (within ~30° and similar length)
+//
+// "More important" type rank: highway > regular > trail > ferry.
+// When trimming over-degree edges, longer / less-important / parallel edges
+// get dropped first.
+
+const MAX_DEGREE = 4;
+const PARALLEL_ANGLE_DEG = 30;
+const PARALLEL_LEN_RATIO = 0.4; // <40% length difference counts as "similar"
+
+function typeRank(t: "highway" | "regular" | "trail" | "ferry"): number {
+  return t === "highway" ? 0 : t === "regular" ? 1 : t === "trail" ? 2 : 3;
+}
+
+function edgeKey(fromId: string, toId: string): string {
+  return fromId < toId ? `${fromId}::${toId}` : `${toId}::${fromId}`;
+}
+
+type PruneCandidate = {
+  fromId: string;
+  toId: string;
+  type: "highway" | "regular" | "trail" | "ferry";
+  label: string | null;
+};
+
+function pruneRoads(
+  candidates: PruneCandidate[],
+  positionsById: Map<string, [number, number]>,
+): PruneCandidate[] {
+  // Step 1: dedupe by city pair, keep the most important type.
+  const byPair = new Map<string, PruneCandidate>();
+  for (const c of candidates) {
+    if (!positionsById.has(c.fromId) || !positionsById.has(c.toId)) continue;
+    const k = edgeKey(c.fromId, c.toId);
+    const existing = byPair.get(k);
+    if (!existing || typeRank(c.type) < typeRank(existing.type)) {
+      byPair.set(k, c);
+    }
+  }
+  let edges = Array.from(byPair.values());
+
+  // Step 2: greedy keep — sort by importance, then process per-city
+  //   - Sort globally: highway first, then by length (shorter first)
+  //   - For each edge, accept iff (a) both endpoints still have spare degree
+  //     AND (b) it's not near-parallel to an already-kept edge from either city.
+  const lengthOf = (e: PruneCandidate) => {
+    const a = positionsById.get(e.fromId)!;
+    const b = positionsById.get(e.toId)!;
+    const dx = a[0] - b[0];
+    const dy = a[1] - b[1];
+    return Math.sqrt(dx * dx + dy * dy);
+  };
+  const angleFromCity = (cityId: string, e: PruneCandidate) => {
+    const a = positionsById.get(cityId)!;
+    const otherId = e.fromId === cityId ? e.toId : e.fromId;
+    const b = positionsById.get(otherId)!;
+    return Math.atan2(b[1] - a[1], b[0] - a[0]);
+  };
+
+  edges.sort((a, b) => typeRank(a.type) - typeRank(b.type) || lengthOf(a) - lengthOf(b));
+
+  const ANGLE_GAP = (PARALLEL_ANGLE_DEG * Math.PI) / 180;
+  const keptEdgesByCity = new Map<string, PruneCandidate[]>();
+  const kept: PruneCandidate[] = [];
+
+  for (const e of edges) {
+    const fromKept = keptEdgesByCity.get(e.fromId) ?? [];
+    const toKept = keptEdgesByCity.get(e.toId) ?? [];
+    if (fromKept.length >= MAX_DEGREE || toKept.length >= MAX_DEGREE) continue;
+
+    const isParallel = (cityId: string, others: PruneCandidate[]) => {
+      const newAng = angleFromCity(cityId, e);
+      const newLen = lengthOf(e);
+      return others.some((k) => {
+        const da = Math.abs(newAng - angleFromCity(cityId, k));
+        const angleDiff = Math.min(da, 2 * Math.PI - da);
+        if (angleDiff > ANGLE_GAP) return false;
+        const kLen = lengthOf(k);
+        const lenRatio = Math.abs(newLen - kLen) / Math.max(newLen, kLen);
+        return lenRatio < PARALLEL_LEN_RATIO;
+      });
+    };
+
+    if (isParallel(e.fromId, fromKept) || isParallel(e.toId, toKept)) continue;
+
+    kept.push(e);
+    fromKept.push(e);
+    toKept.push(e);
+    keptEdgesByCity.set(e.fromId, fromKept);
+    keptEdgesByCity.set(e.toId, toKept);
+  }
+
+  return kept;
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export type TerraformResult = {
@@ -613,24 +715,25 @@ export async function terraform(mapId: string, ai: AiClient): Promise<TerraformR
     cityIdByConvIdx.set(convIdx, city.id);
   }
 
-  // Roads from explicit semantic edges
-  const seenEdges = new Set<string>();
-  const roadIds: string[] = [];
+  // ── Roads ──
+  // Collect candidates in memory first, then dedupe + prune redundancy + write.
+  type RoadCandidate = {
+    fromId: string;
+    toId: string;
+    type: "highway" | "regular" | "trail" | "ferry";
+    label: string | null;
+  };
+  const candidates: RoadCandidate[] = [];
+
+  // 1. Semantic edges from the AI
   for (const e of aiResult.edges ?? []) {
     const fromId = cityIdByConvIdx.get(e.fromCity);
     const toId = cityIdByConvIdx.get(e.toCity);
     if (!fromId || !toId || fromId === toId) continue;
-    const key = fromId < toId ? `${fromId}:${toId}` : `${toId}:${fromId}`;
-    if (seenEdges.has(key)) continue;
-    seenEdges.add(key);
-    const road = await prisma.road.create({
-      data: { mapId, fromId, toId, type: e.type ?? "regular", label: e.concept ?? null },
-      select: { id: true },
-    });
-    roadIds.push(road.id);
+    candidates.push({ fromId, toId, type: e.type ?? "regular", label: e.concept ?? null });
   }
 
-  // Inter-country highways: nearest city pair between neighboring countries
+  // 2. Inter-country highways between neighbour-country pairs (nearest city pair)
   for (let i = 0; i < aiResult.countries.length; i++) {
     const ns = aiResult.countries[i].neighbors ?? [];
     for (const n of ns) {
@@ -656,15 +759,30 @@ export async function terraform(mapId: string, ai: AiClient): Promise<TerraformR
         }
       }
       if (!best) continue;
-      const key = best.fromId < best.toId ? `${best.fromId}:${best.toId}` : `${best.toId}:${best.fromId}`;
-      if (seenEdges.has(key)) continue;
-      seenEdges.add(key);
-      const road = await prisma.road.create({
-        data: { mapId, fromId: best.fromId, toId: best.toId, type: "highway", label: "neighbor border" },
-        select: { id: true },
+      candidates.push({
+        fromId: best.fromId,
+        toId: best.toId,
+        type: "highway",
+        label: "neighbor border",
       });
-      roadIds.push(road.id);
     }
+  }
+
+  const cityPosById = new Map<string, [number, number]>();
+  for (const [convIdx, cityId] of cityIdByConvIdx) {
+    const p = positions.get(convIdx);
+    if (p) cityPosById.set(cityId, p);
+  }
+
+  const finalRoads = pruneRoads(candidates, cityPosById);
+
+  const roadIds: string[] = [];
+  for (const r of finalRoads) {
+    const road = await prisma.road.create({
+      data: { mapId, fromId: r.fromId, toId: r.toId, type: r.type, label: r.label },
+      select: { id: true },
+    });
+    roadIds.push(road.id);
   }
 
   return {
