@@ -14,9 +14,11 @@ import { City } from "./City";
 import { Road } from "./Road";
 import { Legend } from "./Legend";
 import { CityDetailPanel } from "./CityDetailPanel";
+import { Districts } from "./Districts";
+import { ATLAS_STYLE } from "@/lib/atlas-style";
 
-const MIN_SCALE = 0.4;
-const MAX_SCALE = 6;
+const MIN_SCALE = ATLAS_STYLE.zoom.min;
+const MAX_SCALE = ATLAS_STYLE.zoom.max;
 
 export function Atlas({ map }: { map: SampleMap }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -29,6 +31,15 @@ export function Atlas({ map }: { map: SampleMap }) {
     () => new Map(map.countries.map((c) => [c.id, c])),
     [map.countries],
   );
+  const citiesByCountry = useMemo(() => {
+    const m = new Map<string, typeof map.cities>();
+    for (const c of map.cities) {
+      const arr = m.get(c.countryId) ?? [];
+      arr.push(c);
+      m.set(c.countryId, arr);
+    }
+    return m;
+  }, [map.cities]);
   const selectedCity = selectedCityId ? cityById.get(selectedCityId) ?? null : null;
   const selectedCountry = selectedCity ? countryById.get(selectedCity.countryId) ?? null : null;
 
@@ -63,7 +74,7 @@ export function Atlas({ map }: { map: SampleMap }) {
   const { width, height } = map.viewBox;
 
   return (
-    <div className="relative w-full h-full bg-[#e8eef3]">
+    <div className="relative w-full h-full" style={{ backgroundColor: ATLAS_STYLE.sea.color }}>
       <svg
         ref={svgRef}
         viewBox={`0 0 ${width} ${height}`}
@@ -76,7 +87,12 @@ export function Atlas({ map }: { map: SampleMap }) {
           <MapBackdrop width={width} height={height} />
           <Sea width={width} height={height} color={map.sea.color} />
           {map.countries.map((c) => (
-            <Country key={c.id} data={c} scale={scale} />
+            <Country
+              key={c.id}
+              data={c}
+              scale={scale}
+              cities={citiesByCountry.get(c.id) ?? []}
+            />
           ))}
           {map.rivers.map((r) => (
             <River key={r.id} data={r} />
@@ -84,8 +100,8 @@ export function Atlas({ map }: { map: SampleMap }) {
           {map.mountainRanges.map((m) => (
             <MountainRange key={m.id} data={m} />
           ))}
-          {map.roads.map((r) => (
-            <Road key={r.id} data={r} cityById={cityById} />
+          {map.roads.map((r, i) => (
+            <Road key={r.id} data={r} cityById={cityById} scale={scale} number={i + 1} />
           ))}
           {map.cities.map((c) => (
             <City
@@ -96,6 +112,7 @@ export function Atlas({ map }: { map: SampleMap }) {
               scale={scale}
             />
           ))}
+          <Districts cities={map.cities} scale={scale} />
         </g>
       </svg>
 

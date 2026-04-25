@@ -7,6 +7,7 @@ type Result = {
   countriesCreated: number;
   citiesCreated: number;
   roadsCreated: number;
+  roadsCandidates?: number;
   conversationsPlaced: number;
 };
 
@@ -44,7 +45,11 @@ export function TerraformPanel({
     return (
       <div className="flex items-center gap-3 text-xs text-stone-500">
         <span className="text-emerald-600">
-          ✓ {result.citiesCreated} cities placed in {result.countriesCreated} countries
+          ✓ {result.citiesCreated} cities, {result.countriesCreated} countries,{" "}
+          {result.roadsCreated} roads
+          {typeof result.roadsCandidates === "number" && result.roadsCandidates > result.roadsCreated && (
+            <span className="text-stone-400"> (pruned from {result.roadsCandidates})</span>
+          )}
         </span>
         <button
           onClick={() => { setStatus("idle"); setResult(null); }}

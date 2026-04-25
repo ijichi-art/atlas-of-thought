@@ -192,6 +192,8 @@ model City {
   rank          CityRank   @default(town)
   label         String
   labelJa       String?
+  district      String?    // sub-cluster label within country (e.g. "Auth Quarter")
+  districtJa    String?
   summary       String?    @db.Text
   positionX     Float
   positionY     Float
@@ -269,6 +271,10 @@ model Road {
   type      RoadType @default(regular)
   label     String?
   rationale String?  @db.Text
+  // Optional intermediate waypoints (district + country centroids) so multiple
+  // roads passing through the same hierarchy levels share visual segments.
+  // Stored as JSON array of [x, y] pairs.
+  waypoints Json?
   createdAt DateTime @default(now())
 
   map  Map  @relation(fields: [mapId], references: [id], onDelete: Cascade)

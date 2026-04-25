@@ -57,6 +57,10 @@ export type CityData = {
   rank: CityRank;
   label: string;
   labelJa?: string;
+  // District (sub-cluster within country, e.g. "Auth Quarter"). Used for
+  // mid-zoom labels and to group cities visually inside a country.
+  district?: string;
+  districtJa?: string;
   position: Point;
   // 0 = no buildings, 10 = dense cluster
   urbanDensity: number;
