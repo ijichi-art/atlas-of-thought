@@ -137,6 +137,8 @@ export function Atlas({ map }: { map: SampleMap }) {
         city={selectedCity}
         country={selectedCountry}
         onClose={() => setSelectedCityId(null)}
+        allCities={map.cities}
+        countryById={countryById}
       />
     </div>
   );
