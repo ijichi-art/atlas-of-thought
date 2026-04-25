@@ -1,7 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { encrypt, decrypt, hintFromKey } from "@/lib/crypto";
+import type { Provider } from "@/lib/providers";
 
-export type Provider = "anthropic" | "openai" | "deepseek";
+export type { Provider };
 
 const KEY_PREFIXES: Record<Provider, string[]> = {
   anthropic: ["sk-ant-"],

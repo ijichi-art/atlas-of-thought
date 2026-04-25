@@ -1,8 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { PROVIDER_MODELS } from "@/lib/ai-client";
-import type { Provider } from "@/lib/api-keys";
+import { PROVIDER_MODELS, type Provider } from "@/lib/providers";
 
 type KeyMeta = { hint: string; model: string; label: string | null; lastUsedAt: Date | null };
 type Status =
