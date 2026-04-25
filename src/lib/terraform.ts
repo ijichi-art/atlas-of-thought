@@ -520,12 +520,18 @@ function countryPolygonFromCities(
 // When trimming over-degree edges, longer / less-important / parallel edges
 // get dropped first.
 
-const MAX_DEGREE = 3;
-const PARALLEL_ANGLE_DEG = 45;
-const PARALLEL_LEN_RATIO = 0.5; // <50% length difference counts as "similar"
-// Two roads count as visually overlapping if their midpoints are within this many
-// canvas units AND they head in the same direction (within PARALLEL_ANGLE_DEG).
-const VISUAL_OVERLAP_DIST = 130;
+const MAX_DEGREE = 4;
+const PARALLEL_ANGLE_DEG = 30;
+const PARALLEL_LEN_RATIO = 0.4;
+// Two roads count as visual duplicates if their endpoints can be paired up
+// with a total pairwise distance below this. This is more accurate than
+// "midpoint + angle" because it catches roads going from neighbourhood A to
+// neighbourhood B regardless of curve, AND it doesn't false-positive on
+// roads that merely cross each other in the middle.
+//
+// 200 ⇒ on average each endpoint pair is within 100 canvas units of its match.
+// Tunes on a 1640×1000 canvas where typical inter-city distance is ~250.
+const ENDPOINT_MATCH_DIST = 200;
 
 function typeRank(t: "highway" | "regular" | "trail" | "ferry"): number {
   return t === "highway" ? 0 : t === "regular" ? 1 : t === "trail" ? 2 : 3;
@@ -609,50 +615,35 @@ function pruneRoads(
     keptEdgesByCity.set(e.toId, toKept);
   }
 
-  // Step 3: global "visual overlap" pass — drop any kept edge whose midpoint is
-  // close to another kept edge's midpoint AND points the same direction.
-  // (Catches cases where two roads don't share a city but visually run in parallel
-  // because their endpoints happen to be near each other.)
-  const midOf = (e: PruneCandidate): [number, number] => {
-    const a = positionsById.get(e.fromId)!;
-    const b = positionsById.get(e.toId)!;
-    return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-  };
-  const dirOf = (e: PruneCandidate): number => {
-    const a = positionsById.get(e.fromId)!;
-    const b = positionsById.get(e.toId)!;
-    // Normalize to [0, π) — undirected
-    let ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
-    if (ang < 0) ang += Math.PI;
-    if (ang >= Math.PI) ang -= Math.PI;
-    return ang;
+  // Step 3: visual-duplicate pass.
+  //
+  // For every pair of remaining roads, compute the minimum total endpoint-pair
+  // distance (matched optimally — either same orientation or swapped). If the
+  // sum is below ENDPOINT_MATCH_DIST, the two roads connect essentially the
+  // same neighbourhoods and are visual duplicates → drop the lower-priority one.
+  //
+  // This catches the original failing case (parallel #7 + #21 ending at the
+  // same dot, top endpoints very close) without false-positives on roads
+  // that just happen to cross each other.
+  const pdist = (p: [number, number], q: [number, number]) =>
+    Math.sqrt((p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2);
+  const endpointMatchSum = (a: PruneCandidate, b: PruneCandidate): number => {
+    const ap1 = positionsById.get(a.fromId)!;
+    const ap2 = positionsById.get(a.toId)!;
+    const bp1 = positionsById.get(b.fromId)!;
+    const bp2 = positionsById.get(b.toId)!;
+    const direct = pdist(ap1, bp1) + pdist(ap2, bp2);
+    const swapped = pdist(ap1, bp2) + pdist(ap2, bp1);
+    return Math.min(direct, swapped);
   };
 
-  // The visual-overlap pass now applies to ALL pairs, including ones that
-  // share a city. Even a Y-junction can be visually redundant if both arms
-  // head in nearly the same direction (which the user observed and complained
-  // about — see roads #7 and #21 in the screenshot from 2026-04-26).
   const dropped = new Set<number>();
   for (let i = 0; i < kept.length; i++) {
     if (dropped.has(i)) continue;
-    const mi = midOf(kept[i]);
-    const di = dirOf(kept[i]);
     for (let j = i + 1; j < kept.length; j++) {
       if (dropped.has(j)) continue;
+      if (endpointMatchSum(kept[i], kept[j]) > ENDPOINT_MATCH_DIST) continue;
 
-      const mj = midOf(kept[j]);
-      const dx = mi[0] - mj[0];
-      const dy = mi[1] - mj[1];
-      const d = Math.sqrt(dx * dx + dy * dy);
-      if (d > VISUAL_OVERLAP_DIST) continue;
-
-      const dj = dirOf(kept[j]);
-      let angDiff = Math.abs(di - dj);
-      if (angDiff > Math.PI / 2) angDiff = Math.PI - angDiff;
-      if (angDiff > (PARALLEL_ANGLE_DEG * Math.PI) / 180) continue;
-
-      // Both close & parallel → drop the one with the less-important type
-      // (lower priority = bigger typeRank number).
       const dropIdx = typeRank(kept[i].type) <= typeRank(kept[j].type) ? j : i;
       dropped.add(dropIdx);
       if (dropIdx === i) break;
