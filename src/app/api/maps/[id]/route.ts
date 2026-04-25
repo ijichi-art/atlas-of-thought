@@ -78,6 +78,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     toCityId: r.toId,
     type: r.type as RoadData["type"],
     label: r.label ?? undefined,
+    waypoints: (r.waypoints as [number, number][] | null) ?? undefined,
   }));
 
   const sampleMap: SampleMap = {

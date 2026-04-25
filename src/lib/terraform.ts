@@ -507,31 +507,20 @@ function countryPolygonFromCities(
   return detailed;
 }
 
-// ── Road pruning ──────────────────────────────────────────────────────────────
+// ── Hierarchical edge bundling ────────────────────────────────────────────────
 //
-// Real road networks don't have 3 parallel edges leaving the same town.
-// This filter enforces:
-//   1. dedupe (one edge per unordered city pair, prefer the more important type)
-//   2. cap each city's degree at MAX_DEGREE
-//   3. drop edges that point in nearly the same direction as a stronger
-//      already-kept edge from the same city (within ~30° and similar length)
+// Real road networks have a hierarchy: highways connect regions, arterials
+// connect districts, local streets serve neighbourhoods. Multiple destinations
+// SHARE the trunk before branching off near the destination.
 //
-// "More important" type rank: highway > regular > trail > ferry.
-// When trimming over-degree edges, longer / less-important / parallel edges
-// get dropped first.
-
-const MAX_DEGREE = 4;
-const PARALLEL_ANGLE_DEG = 30;
-const PARALLEL_LEN_RATIO = 0.4;
-// Two roads count as visual duplicates if their endpoints can be paired up
-// with a total pairwise distance below this. This is more accurate than
-// "midpoint + angle" because it catches roads going from neighbourhood A to
-// neighbourhood B regardless of curve, AND it doesn't false-positive on
-// roads that merely cross each other in the middle.
+// We replicate this by routing every road through the (countryCentroid →
+// districtCentroid) hierarchy. Roads going between the same district pair
+// pass through the same two centroids → their middle segments physically
+// coincide → they bundle visually like a real interchange.
 //
-// 200 ⇒ on average each endpoint pair is within 100 canvas units of its match.
-// Tunes on a 1640×1000 canvas where typical inter-city distance is ~250.
-const ENDPOINT_MATCH_DIST = 200;
+// We do NOT delete roads — every semantic link the AI identified stays on the
+// map. Only exact duplicates (same unordered city pair, possibly multiple
+// AI edges) are merged into one (preferring the most important type).
 
 function typeRank(t: "highway" | "regular" | "trail" | "ferry"): number {
   return t === "highway" ? 0 : t === "regular" ? 1 : t === "trail" ? 2 : 3;
@@ -541,117 +530,96 @@ function edgeKey(fromId: string, toId: string): string {
   return fromId < toId ? `${fromId}::${toId}` : `${toId}::${fromId}`;
 }
 
-type PruneCandidate = {
+type RoadCandidate = {
   fromId: string;
   toId: string;
   type: "highway" | "regular" | "trail" | "ferry";
   label: string | null;
+  fromConvIdx: number;
+  toConvIdx: number;
 };
 
-function pruneRoads(
-  candidates: PruneCandidate[],
-  positionsById: Map<string, [number, number]>,
-): PruneCandidate[] {
-  // Step 1: dedupe by city pair, keep the most important type.
-  const byPair = new Map<string, PruneCandidate>();
+// Compute district + country centroids from the placed cities.
+function computeCentroids(
+  positions: Map<number, [number, number]>,
+  assignments: Map<number, Assignment>,
+): {
+  districtCentroids: Map<string, [number, number]>; // key = "countryIdx:districtIdx"
+  countryCentroids: Map<number, [number, number]>;
+} {
+  const dGroups = new Map<string, Array<[number, number]>>();
+  const cGroups = new Map<number, Array<[number, number]>>();
+
+  for (const [convIdx, asgn] of assignments) {
+    const pos = positions.get(convIdx);
+    if (!pos) continue;
+    const dKey = `${asgn.countryIdx}:${asgn.districtIdx}`;
+    if (!dGroups.has(dKey)) dGroups.set(dKey, []);
+    dGroups.get(dKey)!.push(pos);
+    if (!cGroups.has(asgn.countryIdx)) cGroups.set(asgn.countryIdx, []);
+    cGroups.get(asgn.countryIdx)!.push(pos);
+  }
+
+  const meanOf = (pts: Array<[number, number]>): [number, number] => [
+    pts.reduce((s, p) => s + p[0], 0) / pts.length,
+    pts.reduce((s, p) => s + p[1], 0) / pts.length,
+  ];
+
+  const districtCentroids = new Map<string, [number, number]>();
+  for (const [k, pts] of dGroups) districtCentroids.set(k, meanOf(pts));
+  const countryCentroids = new Map<number, [number, number]>();
+  for (const [k, pts] of cGroups) countryCentroids.set(k, meanOf(pts));
+
+  return { districtCentroids, countryCentroids };
+}
+
+// Compute the bundled waypoint chain for a road.
+//   same district           → []                          (direct)
+//   same country, diff dist → [districtA, districtB]
+//   diff country            → [districtA, countryA, countryB, districtB]
+//
+// Identical district/country centroids cause adjacent edges to bundle
+// physically — they share segments of their Catmull-Rom path.
+function bundledWaypoints(
+  fromConvIdx: number,
+  toConvIdx: number,
+  assignments: Map<number, Assignment>,
+  districtCentroids: Map<string, [number, number]>,
+  countryCentroids: Map<number, [number, number]>,
+): Array<[number, number]> {
+  const fromAsgn = assignments.get(fromConvIdx);
+  const toAsgn = assignments.get(toConvIdx);
+  if (!fromAsgn || !toAsgn) return [];
+
+  const fromDKey = `${fromAsgn.countryIdx}:${fromAsgn.districtIdx}`;
+  const toDKey = `${toAsgn.countryIdx}:${toAsgn.districtIdx}`;
+  if (fromDKey === toDKey) return [];
+
+  const fromDC = districtCentroids.get(fromDKey);
+  const toDC = districtCentroids.get(toDKey);
+
+  if (fromAsgn.countryIdx === toAsgn.countryIdx) {
+    return [fromDC, toDC].filter((p): p is [number, number] => Array.isArray(p));
+  }
+
+  const fromCC = countryCentroids.get(fromAsgn.countryIdx);
+  const toCC = countryCentroids.get(toAsgn.countryIdx);
+  return [fromDC, fromCC, toCC, toDC].filter((p): p is [number, number] => Array.isArray(p));
+}
+
+// Dedupe candidates by unordered city pair, keeping the most important type.
+// This is the ONLY pruning we do — every distinct semantic link survives.
+function dedupePairs(candidates: RoadCandidate[]): RoadCandidate[] {
+  const byPair = new Map<string, RoadCandidate>();
   for (const c of candidates) {
-    if (!positionsById.has(c.fromId) || !positionsById.has(c.toId)) continue;
+    if (c.fromId === c.toId) continue;
     const k = edgeKey(c.fromId, c.toId);
     const existing = byPair.get(k);
-    if (!existing || typeRank(c.type) < typeRank(existing.type)) {
-      byPair.set(k, c);
-    }
+    if (!existing || typeRank(c.type) < typeRank(existing.type)) byPair.set(k, c);
   }
-  let edges = Array.from(byPair.values());
-
-  // Step 2: greedy keep — sort by importance, then process per-city
-  //   - Sort globally: highway first, then by length (shorter first)
-  //   - For each edge, accept iff (a) both endpoints still have spare degree
-  //     AND (b) it's not near-parallel to an already-kept edge from either city.
-  const lengthOf = (e: PruneCandidate) => {
-    const a = positionsById.get(e.fromId)!;
-    const b = positionsById.get(e.toId)!;
-    const dx = a[0] - b[0];
-    const dy = a[1] - b[1];
-    return Math.sqrt(dx * dx + dy * dy);
-  };
-  const angleFromCity = (cityId: string, e: PruneCandidate) => {
-    const a = positionsById.get(cityId)!;
-    const otherId = e.fromId === cityId ? e.toId : e.fromId;
-    const b = positionsById.get(otherId)!;
-    return Math.atan2(b[1] - a[1], b[0] - a[0]);
-  };
-
-  edges.sort((a, b) => typeRank(a.type) - typeRank(b.type) || lengthOf(a) - lengthOf(b));
-
-  const ANGLE_GAP = (PARALLEL_ANGLE_DEG * Math.PI) / 180;
-  const keptEdgesByCity = new Map<string, PruneCandidate[]>();
-  const kept: PruneCandidate[] = [];
-
-  for (const e of edges) {
-    const fromKept = keptEdgesByCity.get(e.fromId) ?? [];
-    const toKept = keptEdgesByCity.get(e.toId) ?? [];
-    if (fromKept.length >= MAX_DEGREE || toKept.length >= MAX_DEGREE) continue;
-
-    const isParallel = (cityId: string, others: PruneCandidate[]) => {
-      const newAng = angleFromCity(cityId, e);
-      const newLen = lengthOf(e);
-      return others.some((k) => {
-        const da = Math.abs(newAng - angleFromCity(cityId, k));
-        const angleDiff = Math.min(da, 2 * Math.PI - da);
-        if (angleDiff > ANGLE_GAP) return false;
-        const kLen = lengthOf(k);
-        const lenRatio = Math.abs(newLen - kLen) / Math.max(newLen, kLen);
-        return lenRatio < PARALLEL_LEN_RATIO;
-      });
-    };
-
-    if (isParallel(e.fromId, fromKept) || isParallel(e.toId, toKept)) continue;
-
-    kept.push(e);
-    fromKept.push(e);
-    toKept.push(e);
-    keptEdgesByCity.set(e.fromId, fromKept);
-    keptEdgesByCity.set(e.toId, toKept);
-  }
-
-  // Step 3: visual-duplicate pass.
-  //
-  // For every pair of remaining roads, compute the minimum total endpoint-pair
-  // distance (matched optimally — either same orientation or swapped). If the
-  // sum is below ENDPOINT_MATCH_DIST, the two roads connect essentially the
-  // same neighbourhoods and are visual duplicates → drop the lower-priority one.
-  //
-  // This catches the original failing case (parallel #7 + #21 ending at the
-  // same dot, top endpoints very close) without false-positives on roads
-  // that just happen to cross each other.
-  const pdist = (p: [number, number], q: [number, number]) =>
-    Math.sqrt((p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2);
-  const endpointMatchSum = (a: PruneCandidate, b: PruneCandidate): number => {
-    const ap1 = positionsById.get(a.fromId)!;
-    const ap2 = positionsById.get(a.toId)!;
-    const bp1 = positionsById.get(b.fromId)!;
-    const bp2 = positionsById.get(b.toId)!;
-    const direct = pdist(ap1, bp1) + pdist(ap2, bp2);
-    const swapped = pdist(ap1, bp2) + pdist(ap2, bp1);
-    return Math.min(direct, swapped);
-  };
-
-  const dropped = new Set<number>();
-  for (let i = 0; i < kept.length; i++) {
-    if (dropped.has(i)) continue;
-    for (let j = i + 1; j < kept.length; j++) {
-      if (dropped.has(j)) continue;
-      if (endpointMatchSum(kept[i], kept[j]) > ENDPOINT_MATCH_DIST) continue;
-
-      const dropIdx = typeRank(kept[i].type) <= typeRank(kept[j].type) ? j : i;
-      dropped.add(dropIdx);
-      if (dropIdx === i) break;
-    }
-  }
-
-  return kept.filter((_, i) => !dropped.has(i));
+  return Array.from(byPair.values());
 }
+
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
@@ -772,25 +740,30 @@ export async function terraform(mapId: string, ai: AiClient): Promise<TerraformR
     cityIdByConvIdx.set(convIdx, city.id);
   }
 
-  // ── Roads ──
-  // Collect candidates in memory first, then dedupe + prune redundancy + write.
-  type RoadCandidate = {
-    fromId: string;
-    toId: string;
-    type: "highway" | "regular" | "trail" | "ferry";
-    label: string | null;
-  };
+  // ── Roads (hierarchical bundling) ──
+  // Collect every semantic + neighbour-border edge, dedupe by city pair,
+  // then route each through district + country centroids so coincident
+  // hierarchy paths bundle visually.
   const candidates: RoadCandidate[] = [];
 
-  // 1. Semantic edges from the AI
+  // 1. AI semantic edges
+  const convIdxByCityId = new Map<string, number>();
+  for (const [convIdx, cityId] of cityIdByConvIdx) convIdxByCityId.set(cityId, convIdx);
   for (const e of aiResult.edges ?? []) {
     const fromId = cityIdByConvIdx.get(e.fromCity);
     const toId = cityIdByConvIdx.get(e.toCity);
     if (!fromId || !toId || fromId === toId) continue;
-    candidates.push({ fromId, toId, type: e.type ?? "regular", label: e.concept ?? null });
+    candidates.push({
+      fromId,
+      toId,
+      type: e.type ?? "regular",
+      label: e.concept ?? null,
+      fromConvIdx: e.fromCity,
+      toConvIdx: e.toCity,
+    });
   }
 
-  // 2. Inter-country highways between neighbour-country pairs (nearest city pair)
+  // 2. Inter-country highways (nearest city pair between neighbour countries)
   for (let i = 0; i < aiResult.countries.length; i++) {
     const ns = aiResult.countries[i].neighbors ?? [];
     for (const n of ns) {
@@ -798,21 +771,23 @@ export async function terraform(mapId: string, ai: AiClient): Promise<TerraformR
       if (n < 0 || n >= aiResult.countries.length) continue;
       const aCities = Array.from(assignments.entries())
         .filter(([, a]) => a.countryIdx === i)
-        .map(([convIdx]) => ({ id: cityIdByConvIdx.get(convIdx), pos: positions.get(convIdx) }))
+        .map(([convIdx]) => ({ id: cityIdByConvIdx.get(convIdx), pos: positions.get(convIdx), convIdx }))
         .filter((c) => c.id && c.pos);
       const bCities = Array.from(assignments.entries())
         .filter(([, a]) => a.countryIdx === n)
-        .map(([convIdx]) => ({ id: cityIdByConvIdx.get(convIdx), pos: positions.get(convIdx) }))
+        .map(([convIdx]) => ({ id: cityIdByConvIdx.get(convIdx), pos: positions.get(convIdx), convIdx }))
         .filter((c) => c.id && c.pos);
       if (aCities.length === 0 || bCities.length === 0) continue;
 
-      let best: { fromId: string; toId: string; dist: number } | null = null;
+      let best: { fromId: string; toId: string; dist: number; fromConvIdx: number; toConvIdx: number } | null = null;
       for (const a of aCities) {
         for (const b of bCities) {
           const dx = a.pos![0] - b.pos![0];
           const dy = a.pos![1] - b.pos![1];
           const d = dx * dx + dy * dy;
-          if (!best || d < best.dist) best = { fromId: a.id!, toId: b.id!, dist: d };
+          if (!best || d < best.dist) {
+            best = { fromId: a.id!, toId: b.id!, dist: d, fromConvIdx: a.convIdx, toConvIdx: b.convIdx };
+          }
         }
       }
       if (!best) continue;
@@ -821,22 +796,36 @@ export async function terraform(mapId: string, ai: AiClient): Promise<TerraformR
         toId: best.toId,
         type: "highway",
         label: "neighbor border",
+        fromConvIdx: best.fromConvIdx,
+        toConvIdx: best.toConvIdx,
       });
     }
   }
 
-  const cityPosById = new Map<string, [number, number]>();
-  for (const [convIdx, cityId] of cityIdByConvIdx) {
-    const p = positions.get(convIdx);
-    if (p) cityPosById.set(cityId, p);
-  }
+  // Dedupe: only collapse exact city pairs (no other roads removed).
+  const finalRoads = dedupePairs(candidates);
 
-  const finalRoads = pruneRoads(candidates, cityPosById);
+  // Compute centroids ONCE — every road shares the same hierarchy snapshot.
+  const { districtCentroids, countryCentroids } = computeCentroids(positions, assignments);
 
   const roadIds: string[] = [];
   for (const r of finalRoads) {
+    const waypoints = bundledWaypoints(
+      r.fromConvIdx,
+      r.toConvIdx,
+      assignments,
+      districtCentroids,
+      countryCentroids,
+    );
     const road = await prisma.road.create({
-      data: { mapId, fromId: r.fromId, toId: r.toId, type: r.type, label: r.label },
+      data: {
+        mapId,
+        fromId: r.fromId,
+        toId: r.toId,
+        type: r.type,
+        label: r.label,
+        ...(waypoints.length > 0 ? { waypoints: waypoints as unknown as object } : {}),
+      },
       select: { id: true },
     });
     roadIds.push(road.id);
