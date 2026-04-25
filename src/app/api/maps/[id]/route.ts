@@ -63,6 +63,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       rank: c.rank as CityData["rank"],
       label: c.label,
       labelJa: c.labelJa ?? undefined,
+      district: c.district ?? undefined,
+      districtJa: c.districtJa ?? undefined,
       position: [c.positionX, c.positionY] as Point,
       urbanDensity: c.urbanDensity,
       summary: c.summary ?? undefined,

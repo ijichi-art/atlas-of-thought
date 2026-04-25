@@ -192,6 +192,8 @@ model City {
   rank          CityRank   @default(town)
   label         String
   labelJa       String?
+  district      String?    // sub-cluster label within country (e.g. "Auth Quarter")
+  districtJa    String?
   summary       String?    @db.Text
   positionX     Float
   positionY     Float

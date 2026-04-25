@@ -14,9 +14,10 @@ import { City } from "./City";
 import { Road } from "./Road";
 import { Legend } from "./Legend";
 import { CityDetailPanel } from "./CityDetailPanel";
+import { Districts } from "./Districts";
 
 const MIN_SCALE = 0.4;
-const MAX_SCALE = 6;
+const MAX_SCALE = 12;
 
 export function Atlas({ map }: { map: SampleMap }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -63,7 +64,7 @@ export function Atlas({ map }: { map: SampleMap }) {
   const { width, height } = map.viewBox;
 
   return (
-    <div className="relative w-full h-full bg-[#e8eef3]">
+    <div className="relative w-full h-full bg-[#dde5ec]">
       <svg
         ref={svgRef}
         viewBox={`0 0 ${width} ${height}`}
@@ -96,6 +97,7 @@ export function Atlas({ map }: { map: SampleMap }) {
               scale={scale}
             />
           ))}
+          <Districts cities={map.cities} scale={scale} />
         </g>
       </svg>
 
