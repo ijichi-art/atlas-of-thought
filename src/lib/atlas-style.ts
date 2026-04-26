@@ -6,9 +6,9 @@
 
 export const ATLAS_STYLE = {
   // ── Sea / map background ───────────────────────────────────────────────────
-  // Flat pale-blue water, no texture.
+  // Flat pale-blue water, no texture. Tone eyedropped from real Google Maps.
   sea: {
-    color: "#aadaff", // --map-water
+    color: "#aaccdd", // --map-water (toned down from spec's #aadaff)
     grainOpacity: 0, // paper grain disabled (kept in defs for backward-compat)
     grainBaseFreq: 0.9,
   },
@@ -32,23 +32,23 @@ export const ATLAS_STYLE = {
   // Currently inert (useUniformFill=true uses the land color uniformly).
   // Kept for future park/forest overlays.
   biome: {
-    forest: "#c8e6c9", // --map-park
-    desert: "#ebe8e1", // --map-built-up (used as alt urban tone)
+    forest: "#b8d4a8", // --map-park
+    desert: "#ece5d3", // --map-built-up (used as alt urban tone)
   },
   civil: {
-    // Per-city radial-gradient blob; faded built-up beige inside the country.
+    // Per-city built-up polygon fill (yellow-beige urban tone over land).
     blobRadius: 110,
     blobInnerStop: 0.0,
     blobOuterStop: 1.0,
     blobInnerOpacity: 1.0,
     blobOuterOpacity: 0.0,
-    blobColor: "#ebe8e1", // --map-built-up (subtle urban tint over land)
+    blobColor: "#ece5d3", // --map-built-up
   },
 
   // ── Country (land mass + name label) ───────────────────────────────────────
   country: {
     useUniformFill: true,
-    fillColor: "#f5f5f3", // --map-land
+    fillColor: "#e0e8d0", // --map-land (yellow-green, eyedropped from Google Maps)
     strokeColor: "#b8b3a8", // --border-country
     strokeWidth: 1.5,
     haloOffsetY: 0,
@@ -176,16 +176,16 @@ export const ATLAS_STYLE = {
   //   highway → highway, regular → arterial, trail → collector, ferry → transit
   road: {
     highway: {
-      casing: { color: "#f29400", width: 8 } as { color: string; width: number } | undefined,
-      fill: { color: "#fbb03b", width: 6, dash: undefined as string | undefined, opacity: 1 },
+      casing: { color: "#e89c30", width: 8 } as { color: string; width: number } | undefined,
+      fill: { color: "#fbcd5d", width: 6, dash: undefined as string | undefined, opacity: 1 },
       minScale: 0,
       // Perpendicular control-point offset as a fraction of segment length.
       // Lower = straighter (highways are direct). See Road.tsx smoothPath.
       curveOffset: 0.06,
     },
     regular: {
-      casing: { color: "#e6c84c", width: 6 } as { color: string; width: number } | undefined,
-      fill: { color: "#ffe167", width: 4, dash: undefined as string | undefined, opacity: 1 },
+      casing: { color: "#e8c878", width: 6 } as { color: string; width: number } | undefined,
+      fill: { color: "#fde2a0", width: 4, dash: undefined as string | undefined, opacity: 1 },
       minScale: 0.4,
       curveOffset: 0.10,
     },
