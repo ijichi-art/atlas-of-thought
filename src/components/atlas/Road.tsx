@@ -1,21 +1,53 @@
 import type { CityData, RoadData } from "@/types/atlas";
 import { ATLAS_STYLE } from "@/lib/atlas-style";
 
-// Pure linear path. Catmull-Rom was producing visually-parallel "ghost" roads
-// between bundled paths because each curve segment's control points depend on
-// the FAR endpoints of the road (not just the local segment). Two roads going
-// city A → SAME centroid A → SAME centroid B → city B would have IDENTICAL
-// waypoints but still curve apart, since their distinct city endpoints
-// influenced the Catmull-Rom control points along the entire path.
+// Per-segment quadratic-bezier path. Each segment (W_i → W_{i+1}) gets a
+// control point that is the segment midpoint pushed perpendicular by an
+// amount derived from a hash of the two endpoints. This preserves FDEB-style
+// bundling: roads sharing a (W_i, W_{i+1}) trunk segment hash to the SAME
+// control point and render the EXACT same curve. They diverge only at the
+// city endpoints, where each road's first/last segment is unique to it.
 //
-// Linear segments guarantee that any two roads sharing a (waypoint_i,
-// waypoint_{i+1}) pair render the EXACT same line for that segment → physical
-// bundling on the trunk, divergence only at the city endpoints.
-function smoothPath(points: [number, number][]): string {
+// `magnitude` is a per-road-type fraction (0.05–0.30): highways stay direct,
+// local trails wander more.
+function hashSegment(p1: [number, number], p2: [number, number]): number {
+  // Order-independent: segment (A,B) hashes the same as (B,A).
+  const [a, b] = p1[0] + p1[1] * 1e3 < p2[0] + p2[1] * 1e3 ? [p1, p2] : [p2, p1];
+  let h = 2166136261;
+  for (const n of [a[0], a[1], b[0], b[1]]) {
+    h ^= Math.round(n * 1000) | 0;
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function controlPoint(
+  p1: [number, number],
+  p2: [number, number],
+  magnitude: number,
+): [number, number] {
+  const dx = p2[0] - p1[0];
+  const dy = p2[1] - p1[1];
+  const len = Math.hypot(dx, dy);
+  const mx = (p1[0] + p2[0]) / 2;
+  const my = (p1[1] + p2[1]) / 2;
+  if (len < 1) return [mx, my];
+  // Perpendicular unit vector.
+  const nx = -dy / len;
+  const ny = dx / len;
+  const h = hashSegment(p1, p2);
+  // Map hash → signed [-1, 1] so curves bend either side of the line.
+  const signed = ((h % 2000) / 1000) - 1;
+  const offset = magnitude * len * signed;
+  return [mx + nx * offset, my + ny * offset];
+}
+
+function smoothPath(points: [number, number][], magnitude: number): string {
   if (points.length < 2) return "";
   let path = `M ${points[0][0]} ${points[0][1]}`;
   for (let i = 1; i < points.length; i++) {
-    path += ` L ${points[i][0]} ${points[i][1]}`;
+    const [cx, cy] = controlPoint(points[i - 1], points[i], magnitude);
+    path += ` Q ${cx.toFixed(2)} ${cy.toFixed(2)} ${points[i][0]} ${points[i][1]}`;
   }
   return path;
 }
@@ -44,7 +76,7 @@ export function Road({
     ...(data.waypoints ?? []),
     to.position,
   ];
-  const d = smoothPath(points);
+  const d = smoothPath(points, style.curveOffset);
   const inv = 1 / scale;
 
   // Midpoint of the line (close enough — for waypoint-less roads it's exact).

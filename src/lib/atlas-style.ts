@@ -179,21 +179,27 @@ export const ATLAS_STYLE = {
       casing: { color: "#f29400", width: 8 } as { color: string; width: number } | undefined,
       fill: { color: "#fbb03b", width: 6, dash: undefined as string | undefined, opacity: 1 },
       minScale: 0,
+      // Perpendicular control-point offset as a fraction of segment length.
+      // Lower = straighter (highways are direct). See Road.tsx smoothPath.
+      curveOffset: 0.06,
     },
     regular: {
       casing: { color: "#e6c84c", width: 6 } as { color: string; width: number } | undefined,
       fill: { color: "#ffe167", width: 4, dash: undefined as string | undefined, opacity: 1 },
       minScale: 0.4,
+      curveOffset: 0.10,
     },
     trail: {
       casing: { color: "#d8d4ca", width: 4 } as { color: string; width: number } | undefined,
       fill: { color: "#ffffff", width: 2.5, dash: undefined as string | undefined, opacity: 1 },
       minScale: 0.8,
+      curveOffset: 0.18,
     },
     ferry: {
       casing: undefined as undefined | { color: string; width: number },
       fill: { color: "#1976d2", width: 1.5, dash: "4 3" as string | undefined, opacity: 0.9 },
       minScale: 0.7,
+      curveOffset: 0.10,
     },
   },
 
