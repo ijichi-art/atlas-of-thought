@@ -208,6 +208,11 @@ export const ATLAS_STYLE = {
     },
   },
 
+  // ── City street blocks (internal grid, street-level zoom only) ───────────
+  cityBlocks: {
+    minScale: 1.5, // hidden until the user zooms past street level
+  },
+
   // ── Road labels (textPath along the road) ─────────────────────────────────
   // Only highway/arterial roads get a name label, and only at detail zoom.
   roadLabel: {
