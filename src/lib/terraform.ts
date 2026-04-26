@@ -342,73 +342,101 @@ function layoutAll(
 
   const countryCenters: Array<[number, number]> = countryNodes.map((n) => clamp(n.x ?? CX, n.y ?? CY, 220));
 
-  // Step 2: city positions — pulled toward country centers, then nudged toward district centroids
-  const cityNodes: CityNode[] = [];
+  // Step 2: structured city placement per the user's spec
+  //   - capital → at cluster (country) center (with tiny jitter)
+  //   - major cities (rank "city") → 200-400px from capital, random angle
+  //   - towns → scattered 80-500px from capital
+  //   - all cities maintain ≥ MIN_SEP separation (overlap prevention)
+  const MIN_SEP = 100;
+
+  // Group cities by country
+  type CityEntry = { convIdx: number; rank: "capital" | "city" | "town" };
+  const byCountry = new Map<number, CityEntry[]>();
   for (const [convIdx, asgn] of assignments) {
-    const cityInfo = ai.cities.find((c) => c.conversationIndex === convIdx);
-    const rank = cityInfo?.rank ?? "town";
-    const [cx0, cy0] = countryCenters[asgn.countryIdx];
-    const jitterAngle = rng() * 2 * Math.PI;
-    const jitterR = 20 + rng() * 30;
-    cityNodes.push({
-      i: convIdx,
-      countryIdx: asgn.countryIdx,
-      districtIdx: asgn.districtIdx,
-      rank,
-      x: cx0 + Math.cos(jitterAngle) * jitterR,
-      y: cy0 + Math.sin(jitterAngle) * jitterR,
-    });
+    const aiCity = ai.cities.find((c) => c.conversationIndex === convIdx);
+    const rank = aiCity?.rank ?? "town";
+    if (!byCountry.has(asgn.countryIdx)) byCountry.set(asgn.countryIdx, []);
+    byCountry.get(asgn.countryIdx)!.push({ convIdx, rank });
   }
 
-  const ciSim = forceSimulation<CityNode>(cityNodes)
-    .force(
-      "countryX",
-      forceX<CityNode>((d) => countryCenters[d.countryIdx][0]).strength(0.04),
-    )
-    .force(
-      "countryY",
-      forceY<CityNode>((d) => countryCenters[d.countryIdx][1]).strength(0.04),
-    )
-    .force(
-      "collide",
-      forceCollide<CityNode>((d) => (d.rank === "capital" ? 55 : d.rank === "city" ? 42 : 30)),
-    )
-    .force("repel", forceManyBody<CityNode>().strength(-180))
-    .stop();
+  const positions = new Map<number, [number, number]>();
 
-  for (let t = 0; t < 260; t++) ciSim.tick();
+  for (const [countryIdx, cities] of byCountry) {
+    const center = countryCenters[countryIdx];
+    const localRng = mulberry32(seed + countryIdx * 7919 + 1);
+    const placed: [number, number][] = [];
 
-  // Step 3: pull same-district cities toward district centroid
-  for (let pass = 0; pass < 35; pass++) {
-    const dCent = new Map<string, { x: number; y: number; count: number }>();
-    for (const n of cityNodes) {
-      const key = `${n.countryIdx}:${n.districtIdx}`;
-      const c = dCent.get(key) ?? { x: 0, y: 0, count: 0 };
-      c.x += n.x ?? 0;
-      c.y += n.y ?? 0;
-      c.count++;
-      dCent.set(key, c);
+    const tryPlace = (
+      rMin: number,
+      rMax: number,
+      maxAttempts: number,
+    ): [number, number] => {
+      // First pass: try to satisfy hard separation
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const r = rMin + localRng() * (rMax - rMin);
+        const theta = localRng() * 2 * Math.PI;
+        const cand: [number, number] = [
+          center[0] + r * Math.cos(theta),
+          center[1] + r * Math.sin(theta),
+        ];
+        if (cand[0] < 60 || cand[0] > VIEW_W - 60) continue;
+        if (cand[1] < 60 || cand[1] > VIEW_H - 60) continue;
+        let ok = true;
+        for (const p of placed) {
+          if (pdist(cand, p) < MIN_SEP) {
+            ok = false;
+            break;
+          }
+        }
+        if (ok) return cand;
+      }
+      // Fallback: pick the candidate with largest minimum distance to placed
+      let best: [number, number] = center;
+      let bestD = -Infinity;
+      for (let attempt = 0; attempt < 50; attempt++) {
+        const r = rMin + localRng() * (rMax - rMin);
+        const theta = localRng() * 2 * Math.PI;
+        const cand = clamp(
+          center[0] + r * Math.cos(theta),
+          center[1] + r * Math.sin(theta),
+          60,
+        );
+        const minD = placed.length === 0 ? Infinity : Math.min(...placed.map((p) => pdist(cand, p)));
+        if (minD > bestD) {
+          bestD = minD;
+          best = cand;
+        }
+      }
+      return best;
+    };
+
+    // Capital: at country center with small jitter
+    const capital = cities.find((c) => c.rank === "capital");
+    if (capital) {
+      const jitterAngle = localRng() * 2 * Math.PI;
+      const jitterR = localRng() * 20;
+      const capPos: [number, number] = [
+        center[0] + jitterR * Math.cos(jitterAngle),
+        center[1] + jitterR * Math.sin(jitterAngle),
+      ];
+      positions.set(capital.convIdx, capPos);
+      placed.push(capPos);
     }
-    for (const c of dCent.values()) {
-      c.x /= c.count;
-      c.y /= c.count;
+
+    // Major cities: radial 200-400 from capital
+    for (const c of cities.filter((x) => x.rank === "city")) {
+      const pos = tryPlace(200, 400, 100);
+      positions.set(c.convIdx, pos);
+      placed.push(pos);
     }
-    for (const n of cityNodes) {
-      const key = `${n.countryIdx}:${n.districtIdx}`;
-      const c = dCent.get(key)!;
-      n.x = (n.x ?? 0) + (c.x - (n.x ?? 0)) * 0.05;
-      n.y = (n.y ?? 0) + (c.y - (n.y ?? 0)) * 0.05;
+
+    // Towns: scattered 80-500 (whole cluster), min separation
+    for (const c of cities.filter((x) => x.rank === "town")) {
+      const pos = tryPlace(80, 500, 100);
+      positions.set(c.convIdx, pos);
+      placed.push(pos);
     }
   }
-
-  // Final relaxation with collide (also generous so labels don't crowd)
-  const ciSim2 = forceSimulation<CityNode>(cityNodes)
-    .force(
-      "collide",
-      forceCollide<CityNode>((d) => (d.rank === "capital" ? 50 : d.rank === "city" ? 38 : 26)),
-    )
-    .stop();
-  for (let t = 0; t < 100; t++) ciSim2.tick();
 
   // Recompute country centers as actual centroid of their final cities
   const cAcc: { x: number; y: number; count: number }[] = countryCenters.map(() => ({
@@ -416,20 +444,16 @@ function layoutAll(
     y: 0,
     count: 0,
   }));
-  for (const n of cityNodes) {
-    cAcc[n.countryIdx].x += n.x ?? 0;
-    cAcc[n.countryIdx].y += n.y ?? 0;
-    cAcc[n.countryIdx].count++;
+  for (const [convIdx, asgn] of assignments) {
+    const p = positions.get(convIdx);
+    if (!p) continue;
+    cAcc[asgn.countryIdx].x += p[0];
+    cAcc[asgn.countryIdx].y += p[1];
+    cAcc[asgn.countryIdx].count++;
   }
   const finalCenters: Array<[number, number]> = countryCenters.map(([x, y], i) =>
     cAcc[i].count > 0 ? [cAcc[i].x / cAcc[i].count, cAcc[i].y / cAcc[i].count] : [x, y],
   );
-
-  const positions = new Map<number, [number, number]>();
-  for (const n of cityNodes) {
-    const [x, y] = clamp(n.x ?? CX, n.y ?? CY, 60);
-    positions.set(n.i, [x, y]);
-  }
 
   return { positions, countryCenters: finalCenters };
 }
@@ -913,107 +937,168 @@ export async function terraform(mapId: string, ai: AiClient): Promise<TerraformR
     cityIdByConvIdx.set(convIdx, city.id);
   }
 
-  // ── Roads (hierarchical bundling) ──
-  // Collect every semantic + neighbour-border edge, dedupe by city pair,
-  // then route each through district + country centroids so coincident
-  // hierarchy paths bundle visually.
-  const candidates: RoadCandidate[] = [];
+  // ── Structured road network (per the user's spec) ──
+  //   1. Highways: MST + α between every country's capital
+  //   2. Main arterials: within each country, capital → each major city (radial)
+  //   3. Collectors: each major city → 1 nearest other major; each town → nearest major
+  //
+  // Roads are stored as straight lines (no waypoints). MST + radial layout has
+  // no loops by construction, no parallel-near-overlap by construction.
 
-  // 1. AI semantic edges
-  const convIdxByCityId = new Map<string, number>();
-  for (const [convIdx, cityId] of cityIdByConvIdx) convIdxByCityId.set(cityId, convIdx);
-  for (const e of aiResult.edges ?? []) {
-    const fromId = cityIdByConvIdx.get(e.fromCity);
-    const toId = cityIdByConvIdx.get(e.toCity);
-    if (!fromId || !toId || fromId === toId) continue;
-    candidates.push({
-      fromId,
-      toId,
-      type: e.type ?? "regular",
-      label: e.concept ?? null,
-      fromConvIdx: e.fromCity,
-      toConvIdx: e.toCity,
+  type CityRecord = {
+    convIdx: number;
+    cityId: string;
+    rank: "capital" | "city" | "town";
+    pos: [number, number];
+    countryIdx: number;
+  };
+
+  const allCityRecords: CityRecord[] = [];
+  for (const [convIdx, asgn] of assignments) {
+    const cityId = cityIdByConvIdx.get(convIdx);
+    const pos = positions.get(convIdx);
+    if (!cityId || !pos) continue;
+    const aiCity = aiResult.cities.find((c) => c.conversationIndex === convIdx);
+    allCityRecords.push({
+      convIdx,
+      cityId,
+      rank: aiCity?.rank ?? "town",
+      pos,
+      countryIdx: asgn.countryIdx,
     });
   }
 
-  // 2. Inter-country highways (nearest city pair between neighbour countries)
-  for (let i = 0; i < aiResult.countries.length; i++) {
-    const ns = aiResult.countries[i].neighbors ?? [];
-    for (const n of ns) {
-      if (n <= i) continue;
-      if (n < 0 || n >= aiResult.countries.length) continue;
-      const aCities = Array.from(assignments.entries())
-        .filter(([, a]) => a.countryIdx === i)
-        .map(([convIdx]) => ({ id: cityIdByConvIdx.get(convIdx), pos: positions.get(convIdx), convIdx }))
-        .filter((c) => c.id && c.pos);
-      const bCities = Array.from(assignments.entries())
-        .filter(([, a]) => a.countryIdx === n)
-        .map(([convIdx]) => ({ id: cityIdByConvIdx.get(convIdx), pos: positions.get(convIdx), convIdx }))
-        .filter((c) => c.id && c.pos);
-      if (aCities.length === 0 || bCities.length === 0) continue;
+  const candidates: RoadCandidate[] = [];
 
-      let best: { fromId: string; toId: string; dist: number; fromConvIdx: number; toConvIdx: number } | null = null;
-      for (const a of aCities) {
-        for (const b of bCities) {
-          const dx = a.pos![0] - b.pos![0];
-          const dy = a.pos![1] - b.pos![1];
-          const d = dx * dx + dy * dy;
-          if (!best || d < best.dist) {
-            best = { fromId: a.id!, toId: b.id!, dist: d, fromConvIdx: a.convIdx, toConvIdx: b.convIdx };
-          }
-        }
+  // Group cities by country for arterials and collectors
+  const recordsByCountry = new Map<number, CityRecord[]>();
+  for (const r of allCityRecords) {
+    if (!recordsByCountry.has(r.countryIdx)) recordsByCountry.set(r.countryIdx, []);
+    recordsByCountry.get(r.countryIdx)!.push(r);
+  }
+
+  // Step 1: highway network — MST + α between capitals (one per country)
+  const capitals: CityRecord[] = [];
+  for (const records of recordsByCountry.values()) {
+    const cap = records.find((r) => r.rank === "capital");
+    if (cap) capitals.push(cap);
+  }
+  if (capitals.length >= 2) {
+    type CapEdge = { i: number; j: number; d: number };
+    const allCapEdges: CapEdge[] = [];
+    for (let i = 0; i < capitals.length; i++) {
+      for (let j = i + 1; j < capitals.length; j++) {
+        allCapEdges.push({ i, j, d: pdist(capitals[i].pos, capitals[j].pos) });
       }
-      if (!best) continue;
+    }
+    allCapEdges.sort((a, b) => a.d - b.d);
+
+    // Kruskal's MST
+    const parent = capitals.map((_, i) => i);
+    const find = (x: number): number => {
+      while (parent[x] !== x) {
+        parent[x] = parent[parent[x]];
+        x = parent[x];
+      }
+      return x;
+    };
+    const mstPicks: CapEdge[] = [];
+    const restPicks: CapEdge[] = [];
+    for (const e of allCapEdges) {
+      const ra = find(e.i);
+      const rb = find(e.j);
+      if (ra !== rb) {
+        parent[ra] = rb;
+        mstPicks.push(e);
+      } else {
+        restPicks.push(e);
+      }
+    }
+    // α: 1-2 extra cheapest non-MST edges so the highway graph isn't a strict tree
+    const alpha = Math.min(2, Math.max(0, Math.floor(capitals.length / 3)));
+    const allHighwayEdges = [...mstPicks, ...restPicks.slice(0, alpha)];
+    for (const e of allHighwayEdges) {
+      const a = capitals[e.i];
+      const b = capitals[e.j];
       candidates.push({
-        fromId: best.fromId,
-        toId: best.toId,
+        fromId: a.cityId,
+        toId: b.cityId,
         type: "highway",
-        label: "neighbor border",
-        fromConvIdx: best.fromConvIdx,
-        toConvIdx: best.toConvIdx,
+        label: "national highway",
+        fromConvIdx: a.convIdx,
+        toConvIdx: b.convIdx,
       });
     }
   }
 
-  // Dedupe: only collapse exact city pairs (no other roads removed).
+  // Step 2: within each country, capital → each major city (radial arterials)
+  for (const records of recordsByCountry.values()) {
+    const cap = records.find((r) => r.rank === "capital");
+    if (!cap) continue;
+    for (const r of records) {
+      if (r.rank !== "city") continue;
+      candidates.push({
+        fromId: cap.cityId,
+        toId: r.cityId,
+        type: "regular",
+        label: "main arterial",
+        fromConvIdx: cap.convIdx,
+        toConvIdx: r.convIdx,
+      });
+    }
+  }
+
+  // Step 3: collectors — each major city → 1 nearest major (city or capital);
+  //                       each town → nearest major
+  for (const records of recordsByCountry.values()) {
+    const majors = records.filter((r) => r.rank === "city" || r.rank === "capital");
+    const towns = records.filter((r) => r.rank === "town");
+
+    // City ↔ city (1 nearest non-capital pair; dedupe later collapses repeats)
+    for (const m of majors) {
+      if (m.rank !== "city") continue; // start from cities; pair with nearest other major
+      const others = majors.filter((x) => x.cityId !== m.cityId);
+      if (others.length === 0) continue;
+      others.sort((a, b) => pdist(m.pos, a.pos) - pdist(m.pos, b.pos));
+      const nearest = others[0];
+      candidates.push({
+        fromId: m.cityId,
+        toId: nearest.cityId,
+        type: "trail",
+        label: "collector",
+        fromConvIdx: m.convIdx,
+        toConvIdx: nearest.convIdx,
+      });
+    }
+
+    // Each town → nearest major
+    for (const t of towns) {
+      if (majors.length === 0) continue;
+      let nearest = majors[0];
+      let minD = pdist(t.pos, nearest.pos);
+      for (let i = 1; i < majors.length; i++) {
+        const d = pdist(t.pos, majors[i].pos);
+        if (d < minD) {
+          minD = d;
+          nearest = majors[i];
+        }
+      }
+      candidates.push({
+        fromId: t.cityId,
+        toId: nearest.cityId,
+        type: "trail",
+        label: "local road",
+        fromConvIdx: t.convIdx,
+        toConvIdx: nearest.convIdx,
+      });
+    }
+  }
+
+  // Dedupe identical pairs (e.g. city-A→city-B added from both sides)
   const finalRoads = dedupePairs(candidates);
 
-  // Compute centroids ONCE — every road shares the same hierarchy snapshot.
-  const { districtCentroids, countryCentroids } = computeCentroids(positions, assignments);
-
-  // 1. Hierarchical waypoints (district / country centroids) provide the trunk.
-  const initialPaths: EdgePath[] = finalRoads.map((r) => {
-    const fromPos = positions.get(r.fromConvIdx);
-    const toPos = positions.get(r.toConvIdx);
-    if (!fromPos || !toPos) return [];
-    const wps = bundledWaypoints(
-      r.fromConvIdx,
-      r.toConvIdx,
-      assignments,
-      districtCentroids,
-      countryCentroids,
-    );
-    return [fromPos, ...wps, toPos];
-  });
-
-  // 2. FDEB: physically pull compatible roads together so corridor traffic
-  //    bundles into shared trunks instead of running parallel-but-separate.
-  const bundled: EdgePath[] = fdebBundle(initialPaths, {
-    iterations: 60,
-    subdivisions: 10,
-    initialStep: 0.4,
-    cooling: 0.95,
-    springK: 0.08,
-    compatibilityThreshold: 0.55,
-  });
-
   const roadIds: string[] = [];
-  for (let i = 0; i < finalRoads.length; i++) {
-    const r = finalRoads[i];
-    const path = bundled[i];
-    // The endpoints of `path` are the city positions; persist only the
-    // interior subdivision points as waypoints (Road.tsx adds endpoints back).
-    const interior = path.slice(1, -1);
+  for (const r of finalRoads) {
     const road = await prisma.road.create({
       data: {
         mapId,
@@ -1021,7 +1106,8 @@ export async function terraform(mapId: string, ai: AiClient): Promise<TerraformR
         toId: r.toId,
         type: r.type,
         label: r.label,
-        ...(interior.length > 0 ? { waypoints: interior as unknown as object } : {}),
+        // No waypoints — straight line from city to city (no intermediate trunks).
+        // The structured network (MST + radial + collectors) doesn't need bundling.
       },
       select: { id: true },
     });
