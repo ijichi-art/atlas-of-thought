@@ -93,6 +93,15 @@ export function Country({
   const inv = 1 / scale;
   const path = smoothPath(data.polygon);
 
+  // Country labels fade out as the user zooms in (full at wide view → 0 at detail).
+  const fadeFactor =
+    scale <= T.label.fadeStart
+      ? 1
+      : scale >= T.label.fadeEnd
+        ? 0
+        : 1 - (scale - T.label.fadeStart) / (T.label.fadeEnd - T.label.fadeStart);
+  const labelOpacity = T.label.opacity * fadeFactor;
+
   const biomeKey = pickBiome(data.name);
   const fillColor = T.useUniformFill ? T.fillColor : ATLAS_STYLE.biome[biomeKey];
 
@@ -128,17 +137,19 @@ export function Country({
         })}
       </g>
 
-      {/* Country border (drawn over the biome+blobs) */}
+      {/* Country border — dotted line, modern map style. */}
       <path
         d={path}
         fill="none"
         stroke={T.strokeColor}
         strokeWidth={T.strokeWidth}
+        strokeDasharray={T.strokeDash}
         strokeLinejoin="round"
         vectorEffect="non-scaling-stroke"
       />
 
-      {/* Country label */}
+      {/* Country label — hidden once fully faded out at high zoom. */}
+      {labelOpacity > 0 && (
       <g transform={`translate(${cx} ${cy}) scale(${inv})`} pointerEvents="none">
         <text
           textAnchor="middle"
@@ -153,7 +164,7 @@ export function Country({
             strokeWidth: T.label.haloWidth,
             strokeLinejoin: "round",
             textTransform: T.label.uppercase ? "uppercase" : "none",
-            opacity: T.label.opacity,
+            opacity: labelOpacity,
           }}
         >
           {T.label.uppercase ? data.name.toUpperCase() : data.name}
@@ -172,13 +183,14 @@ export function Country({
               stroke: T.label.haloColor,
               strokeWidth: T.label.jaHaloWidth,
               strokeLinejoin: "round",
-              opacity: T.label.opacity,
+              opacity: labelOpacity,
             }}
           >
             {data.nameJa}
           </text>
         )}
       </g>
+      )}
     </g>
   );
 }

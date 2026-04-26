@@ -51,6 +51,7 @@ export const ATLAS_STYLE = {
     fillColor: "#e0e8d0", // --map-land (yellow-green, eyedropped from Google Maps)
     strokeColor: "#b8b3a8", // --border-country
     strokeWidth: 1.5,
+    strokeDash: "4 3", // dotted border per spec rule G
     haloOffsetY: 0,
     haloOpacity: 0,
     label: {
@@ -61,6 +62,10 @@ export const ATLAS_STYLE = {
       haloColor: "#ffffff", // --label-stroke
       haloWidth: 4,
       opacity: 0.5,
+      // Country labels are most readable at wide view and fade as the user
+      // zooms in (they get in the way at street level).
+      fadeStart: 1.0,
+      fadeEnd: 2.5,
       uppercase: true,
       jaFontSize: 13,
       jaFontWeight: 400,
