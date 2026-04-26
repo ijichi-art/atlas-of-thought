@@ -208,6 +208,20 @@ export const ATLAS_STYLE = {
     },
   },
 
+  // ── Road labels (textPath along the road) ─────────────────────────────────
+  // Only highway/arterial roads get a name label, and only at detail zoom.
+  roadLabel: {
+    fontSize: 9, // user units; rendered as 9 / scale to stay constant on screen
+    fontWeight: 500,
+    color: "#8a8a8a", // --label-street
+    haloColor: "#ffffff",
+    haloWidth: 2.5,
+    letterSpacing: 0.3,
+    minScale: 1.2,
+    // Show labels only on these road types (others stay anonymous).
+    showOnTypes: ["highway", "regular"] as Array<"highway" | "regular" | "trail" | "ferry">,
+  },
+
   // ── Road number badge (Google-Maps-style highway shield) ──────────────────
   roadNumber: {
     fontSize: 9,

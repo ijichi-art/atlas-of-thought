@@ -90,6 +90,13 @@ export function Road({
   const showBadge = scale >= ATLAS_STYLE.roadNumber.minScale;
   const badge = ATLAS_STYLE.roadNumber;
 
+  const labelStyle = ATLAS_STYLE.roadLabel;
+  const showLabel =
+    !!data.label &&
+    scale >= labelStyle.minScale &&
+    labelStyle.showOnTypes.includes(data.type);
+  const labelPathId = `road-label-path-${data.id}`;
+
   return (
     <g data-road-id={data.id} pointerEvents="none">
       {/* Casing (drawn first, wider) — gives roads the Google-Maps double-stroke look. */}
@@ -107,6 +114,7 @@ export function Road({
       {/* Fill (drawn on top, narrower). vector-effect keeps stroke width
           constant on screen regardless of the SVG zoom transform. */}
       <path
+        id={labelPathId}
         d={d}
         fill="none"
         stroke={style.fill.color}
@@ -117,6 +125,32 @@ export function Road({
         strokeDasharray={style.fill.dash}
         vectorEffect="non-scaling-stroke"
       />
+
+      {/* Road label along the path. fontSize / haloWidth divide by scale so
+          the label stays a constant size on screen as the user zooms. */}
+      {showLabel && (
+        <text
+          fontSize={labelStyle.fontSize / scale}
+          fontWeight={labelStyle.fontWeight}
+          fill={labelStyle.color}
+          letterSpacing={labelStyle.letterSpacing / scale}
+          style={{
+            fontFamily: ATLAS_STYLE.font.family,
+            paintOrder: "stroke fill",
+            stroke: labelStyle.haloColor,
+            strokeWidth: labelStyle.haloWidth / scale,
+            strokeLinejoin: "round",
+          }}
+        >
+          <textPath
+            href={`#${labelPathId}`}
+            startOffset="50%"
+            textAnchor="middle"
+          >
+            {data.label}
+          </textPath>
+        </text>
+      )}
 
       {/* Number badge — inverse-scaled so it stays a constant size. */}
       {showBadge && (
