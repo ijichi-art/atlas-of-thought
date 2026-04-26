@@ -89,11 +89,11 @@ export function City({
         >
           <text
             textAnchor="middle"
-            fontFamily={ATLAS_STYLE.font.family}
             fontSize={lab.fontSize}
             fontWeight={lab.fontWeight}
             fill={lab.color}
             style={{
+              fontFamily: ATLAS_STYLE.font.family,
               paintOrder: "stroke fill",
               stroke: lab.haloColor,
               strokeWidth: lab.haloWidth,
@@ -107,11 +107,11 @@ export function City({
             <text
               y={lab.fontSize + 1}
               textAnchor="middle"
-              fontFamily={ATLAS_STYLE.font.family}
               fontSize={Math.round(lab.fontSize * lab.jaFontSizeRatio)}
               fontWeight={lab.jaFontWeight}
               fill={lab.jaColor}
               style={{
+                fontFamily: ATLAS_STYLE.font.family,
                 paintOrder: "stroke fill",
                 stroke: lab.haloColor,
                 strokeWidth: lab.jaHaloWidth,

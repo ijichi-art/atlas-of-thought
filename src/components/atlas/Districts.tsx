@@ -51,12 +51,12 @@ export function Districts({ cities, scale }: { cities: CityData[]; scale: number
         <g key={i} transform={`translate(${d.x} ${d.y + lab.yOffsetPx * inv}) scale(${inv})`}>
           <text
             textAnchor="middle"
-            fontFamily={ATLAS_STYLE.font.family}
             fontSize={lab.fontSize}
             fontWeight={lab.fontWeight}
             fill={lab.color}
             letterSpacing={lab.letterSpacing}
             style={{
+              fontFamily: ATLAS_STYLE.font.family,
               paintOrder: "stroke fill",
               stroke: lab.haloColor,
               strokeWidth: lab.haloWidth,
@@ -70,11 +70,11 @@ export function Districts({ cities, scale }: { cities: CityData[]; scale: number
             <text
               textAnchor="middle"
               y={lab.jaOffsetY}
-              fontFamily={ATLAS_STYLE.font.family}
               fontSize={lab.jaFontSize}
               fill={lab.jaColor}
               letterSpacing={lab.jaLetterSpacing}
               style={{
+                fontFamily: ATLAS_STYLE.font.family,
                 paintOrder: "stroke fill",
                 stroke: lab.haloColor,
                 strokeWidth: lab.jaHaloWidth,

@@ -22,8 +22,10 @@ export const ATLAS_STYLE = {
 
   // ── Typography (shared) ────────────────────────────────────────────────────
   font: {
+    // Loaded by next/font/google in src/app/layout.tsx (Inter + Noto Sans JP).
+    // Components apply this via the `style` prop so that var() resolves.
     family:
-      '"Inter", "IBM Plex Sans", "Noto Sans JP", -apple-system, system-ui, sans-serif',
+      'var(--font-inter), var(--font-noto-jp), -apple-system, system-ui, sans-serif',
   },
 
   // ── Biome (terrain in city-less regions) ───────────────────────────────────

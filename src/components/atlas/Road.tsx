@@ -60,7 +60,19 @@ export function Road({
 
   return (
     <g data-road-id={data.id} pointerEvents="none">
-      {/* No casing — single solid stroke. vector-effect keeps stroke width
+      {/* Casing (drawn first, wider) — gives roads the Google-Maps double-stroke look. */}
+      {style.casing && (
+        <path
+          d={d}
+          fill="none"
+          stroke={style.casing.color}
+          strokeWidth={style.casing.width}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          vectorEffect="non-scaling-stroke"
+        />
+      )}
+      {/* Fill (drawn on top, narrower). vector-effect keeps stroke width
           constant on screen regardless of the SVG zoom transform. */}
       <path
         d={d}
@@ -70,6 +82,7 @@ export function Road({
         strokeLinecap="round"
         strokeLinejoin="round"
         opacity={style.fill.opacity}
+        strokeDasharray={style.fill.dash}
         vectorEffect="non-scaling-stroke"
       />
 

@@ -113,12 +113,12 @@ export function Country({
       <g transform={`translate(${cx} ${cy}) scale(${inv})`} pointerEvents="none">
         <text
           textAnchor="middle"
-          fontFamily={ATLAS_STYLE.font.family}
           fontSize={T.label.fontSize}
           fontWeight={T.label.fontWeight}
           fill={T.label.color}
           letterSpacing={T.label.letterSpacing}
           style={{
+            fontFamily: ATLAS_STYLE.font.family,
             paintOrder: "stroke fill",
             stroke: T.label.haloColor,
             strokeWidth: T.label.haloWidth,
@@ -133,12 +133,12 @@ export function Country({
           <text
             textAnchor="middle"
             y={T.label.jaOffsetY}
-            fontFamily={ATLAS_STYLE.font.family}
             fontSize={T.label.jaFontSize}
             fontWeight={T.label.jaFontWeight}
             fill={T.label.jaColor}
             letterSpacing={T.label.jaLetterSpacing}
             style={{
+              fontFamily: ATLAS_STYLE.font.family,
               paintOrder: "stroke fill",
               stroke: T.label.haloColor,
               strokeWidth: T.label.jaHaloWidth,
