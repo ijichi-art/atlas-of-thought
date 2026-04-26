@@ -13,6 +13,7 @@ import { Legend } from "./Legend";
 import { CityDetailPanel } from "./CityDetailPanel";
 import { Districts } from "./Districts";
 import { ATLAS_STYLE } from "@/lib/atlas-style";
+import { bundleSharedTrunks } from "@/lib/bundle-trunks";
 
 const MIN_SCALE = ATLAS_STYLE.zoom.min;
 const MAX_SCALE = ATLAS_STYLE.zoom.max;
@@ -37,6 +38,12 @@ export function Atlas({ map }: { map: SampleMap }) {
     }
     return m;
   }, [map.cities]);
+  // Roads with shared-trunk waypoints inserted: roads heading in the same
+  // direction from a shared city merge into one trunk and fork at the end.
+  const bundledRoads = useMemo(
+    () => bundleSharedTrunks(map.roads, map.cities),
+    [map.roads, map.cities],
+  );
   const selectedCity = selectedCityId ? cityById.get(selectedCityId) ?? null : null;
   const selectedCountry = selectedCity ? countryById.get(selectedCity.countryId) ?? null : null;
 
@@ -94,7 +101,7 @@ export function Atlas({ map }: { map: SampleMap }) {
             <River key={r.id} data={r} />
           ))}
           {/* MountainRange: hidden (old-map element, replaced by Google-Maps style). */}
-          {map.roads.map((r, i) => (
+          {bundledRoads.map((r, i) => (
             <Road key={r.id} data={r} cityById={cityById} scale={scale} number={i + 1} />
           ))}
           {map.cities.map((c) => (
