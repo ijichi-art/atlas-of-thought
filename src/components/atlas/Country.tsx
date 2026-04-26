@@ -78,6 +78,30 @@ function builtUpPolygon(
   return pts;
 }
 
+// Synthetic parks scattered inside each city's built-up area. Clipped to the
+// country polygon so parks never spill outside borders. Per spec rule F:
+// 1–3 parks per city, var(--map-park) green, irregular polygon.
+function parksForCity(city: CityData): Array<[number, number][]> {
+  const count = city.rank === "capital" ? 2 : city.rank === "city" ? 1 : 0;
+  if (count === 0) return [];
+  const parkBaseR = city.rank === "capital" ? 32 : 22;
+  const cityR = builtUpRadius(city.rank);
+  let s = hashStr(city.id) ^ 0xa5a5a5a5;
+  const polys: Array<[number, number][]> = [];
+  for (let i = 0; i < count; i++) {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+    const angle = (s / 0xffffffff) * Math.PI * 2;
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+    const dist = (s / 0xffffffff) * cityR * 0.55;
+    const px = city.position[0] + Math.cos(angle) * dist;
+    const py = city.position[1] + Math.sin(angle) * dist;
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+    const r = parkBaseR * (0.75 + 0.35 * (s / 0xffffffff));
+    polys.push(builtUpPolygon([px, py], r, s));
+  }
+  return polys;
+}
+
 export function Country({
   data,
   scale,
@@ -128,13 +152,22 @@ export function Country({
       {/* Land mass — flat fill (no inner shadow). */}
       <path d={path} fill={fillColor} />
 
-      {/* Built-up areas: irregular polygons per city (rank-scaled radius,
-          seeded jitter), clipped to this country. Replaces circular blobs. */}
+      {/* Built-up areas + parks per city, both clipped to the country so they
+          never spill across borders. Built-up beige first, parks layered over. */}
       <g clipPath={`url(#${clipId})`}>
         {cities.map((c) => {
           const poly = builtUpPolygon(c.position, builtUpRadius(c.rank), hashStr(c.id));
           return <path key={c.id} d={smoothPath(poly)} fill={civ.blobColor} />;
         })}
+        {cities.flatMap((c) =>
+          parksForCity(c).map((poly, i) => (
+            <path
+              key={`park-${c.id}-${i}`}
+              d={smoothPath(poly)}
+              fill={ATLAS_STYLE.biome.forest}
+            />
+          )),
+        )}
       </g>
 
       {/* Country border — dotted line, modern map style. */}
