@@ -104,10 +104,10 @@ export function Road({
             x={0}
             y={badge.fontSize * 0.36}
             textAnchor="middle"
-            fontFamily={ATLAS_STYLE.font.family}
             fontSize={badge.fontSize}
             fontWeight={badge.fontWeight}
             fill={badge.textColor}
+            style={{ fontFamily: ATLAS_STYLE.font.family }}
           >
             {number}
           </text>
