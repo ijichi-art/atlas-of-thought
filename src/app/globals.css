@@ -3,6 +3,48 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+
+  /* ── Map palette (Google Maps style) ──────────────────────────────────── */
+  /* Authoritative source: src/lib/atlas-style.ts. These CSS variables mirror
+     it for any non-SVG map chrome and as a single reference. */
+  --map-background: #f5f5f3;
+  --map-water: #aadaff;
+  --map-water-label: #4a90c8;
+
+  --map-land: #f5f5f3;
+  --map-park: #c8e6c9;
+  --map-forest: #a5d6a7;
+  --map-built-up: #ebe8e1;
+  --map-residential: #f0ede5;
+  --map-commercial: #fdf3d8;
+  --map-industrial: #e8e0d0;
+
+  --road-highway: #fbb03b;
+  --road-highway-stroke: #f29400;
+  --road-arterial: #ffe167;
+  --road-arterial-stroke: #e6c84c;
+  --road-collector: #ffffff;
+  --road-collector-stroke: #d8d4ca;
+  --road-local: #ffffff;
+  --road-local-stroke: #e0ddd5;
+
+  --rail-line: #b8b3a8;
+  --rail-tick: #ffffff;
+
+  --label-country: #5a5a5a;
+  --label-city-major: #2c2c2c;
+  --label-city-minor: #5a5a5a;
+  --label-district: #757575;
+  --label-street: #8a8a8a;
+  --label-stroke: #ffffff;
+
+  --border-country: #b8b3a8;
+  --border-region: #d4cfc4;
+  --border-city: #e3ded3;
+
+  --landmark-poi: #d65a4a;
+  --landmark-transit: #1976d2;
+  --landmark-text: #2c2c2c;
 }
 
 @theme inline {

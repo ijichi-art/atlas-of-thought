@@ -65,10 +65,10 @@ export function Country({
         <clipPath id={clipId}>
           <path d={path} />
         </clipPath>
-        {/* Per-city radial gradient: white at center, fading to transparent. */}
+        {/* Per-city radial gradient — subtle built-up tint over the land. */}
         <radialGradient id={gradientId}>
-          <stop offset={`${civ.blobInnerStop * 100}%`} stopColor="#fbf7ee" stopOpacity={civ.blobInnerOpacity} />
-          <stop offset={`${civ.blobOuterStop * 100}%`} stopColor="#fbf7ee" stopOpacity={civ.blobOuterOpacity} />
+          <stop offset={`${civ.blobInnerStop * 100}%`} stopColor={civ.blobColor} stopOpacity={civ.blobInnerOpacity} />
+          <stop offset={`${civ.blobOuterStop * 100}%`} stopColor={civ.blobColor} stopOpacity={civ.blobOuterOpacity} />
         </radialGradient>
       </defs>
 
@@ -79,16 +79,11 @@ export function Country({
           fill={fillColor}
           opacity={T.haloOpacity}
           transform={`translate(0 ${T.haloOffsetY})`}
-          filter="url(#country-inset)"
         />
       )}
 
-      {/* Land mass — biome colour fills the country. */}
-      <path
-        d={path}
-        fill={fillColor}
-        filter="url(#country-inset)"
-      />
+      {/* Land mass — flat fill (no inner shadow). */}
+      <path d={path} fill={fillColor} />
 
       {/* Civil "white" blobs over each city, clipped to this country only.
           Their radial gradients fade out — far-from-cities areas keep the biome colour. */}

@@ -63,18 +63,5 @@ export function AtlasDefs() {
 
 export function MapBackdrop({ width, height }: { width: number; height: number }) {
   const { sea } = ATLAS_STYLE;
-  return (
-    <>
-      <rect x={0} y={0} width={width} height={height} fill={sea.color} />
-      <rect
-        x={0}
-        y={0}
-        width={width}
-        height={height}
-        fill={sea.color}
-        filter="url(#paper-grain)"
-        opacity={sea.grainOpacity}
-      />
-    </>
-  );
+  return <rect x={0} y={0} width={width} height={height} fill={sea.color} />;
 }
