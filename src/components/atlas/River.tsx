@@ -1,4 +1,5 @@
 import type { RiverData } from "@/types/atlas";
+import { ATLAS_STYLE } from "@/lib/atlas-style";
 
 // Catmull-Rom-ish smoothing so rivers don't render as zig-zag polylines.
 function smoothPath(points: [number, number][]): string {
@@ -27,7 +28,7 @@ export function River({ data }: { data: RiverData }) {
     <g data-river-id={data.id} pointerEvents="none">
       <path
         d={smoothPath(data.path)}
-        stroke="#aaccdd"
+        stroke={ATLAS_STYLE.sea.color}
         strokeWidth={3}
         fill="none"
         strokeLinecap="round"

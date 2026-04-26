@@ -38,6 +38,46 @@ function pickBiome(name: string): "forest" | "desert" {
   return ((h >>> 0) & 1) === 0 ? "forest" : "desert";
 }
 
+// Per-city built-up area: irregular polygon (12 radial points with seeded
+// random radii) instead of a perfect circle, so urban regions look like real
+// city footprints rather than blobs. Radius scales with city rank.
+function builtUpRadius(rank: CityData["rank"]): number {
+  switch (rank) {
+    case "capital":
+      return 100; // spec: 80–120
+    case "city":
+      return 65; // spec: 50–80
+    case "town":
+      return 30; // spec: 25–50
+  }
+}
+
+function hashStr(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function builtUpPolygon(
+  center: [number, number],
+  baseR: number,
+  seed: number,
+): [number, number][] {
+  const N = 12;
+  let s = seed >>> 0;
+  const pts: [number, number][] = [];
+  for (let i = 0; i < N; i++) {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+    const r = baseR * (0.65 + 0.35 * (s / 0xffffffff));
+    const angle = (i / N) * Math.PI * 2;
+    pts.push([center[0] + Math.cos(angle) * r, center[1] + Math.sin(angle) * r]);
+  }
+  return pts;
+}
+
 export function Country({
   data,
   scale,
@@ -57,7 +97,6 @@ export function Country({
   const fillColor = T.useUniformFill ? T.fillColor : ATLAS_STYLE.biome[biomeKey];
 
   const clipId = `country-clip-${data.id}`;
-  const gradientId = `civil-grad-${data.id}`;
 
   return (
     <g data-country-id={data.id}>
@@ -65,11 +104,6 @@ export function Country({
         <clipPath id={clipId}>
           <path d={path} />
         </clipPath>
-        {/* Per-city radial gradient — subtle built-up tint over the land. */}
-        <radialGradient id={gradientId}>
-          <stop offset={`${civ.blobInnerStop * 100}%`} stopColor={civ.blobColor} stopOpacity={civ.blobInnerOpacity} />
-          <stop offset={`${civ.blobOuterStop * 100}%`} stopColor={civ.blobColor} stopOpacity={civ.blobOuterOpacity} />
-        </radialGradient>
       </defs>
 
       {/* Soft halo behind the country (no-op when haloOpacity=0) */}
@@ -85,18 +119,13 @@ export function Country({
       {/* Land mass — flat fill (no inner shadow). */}
       <path d={path} fill={fillColor} />
 
-      {/* Civil "white" blobs over each city, clipped to this country only.
-          Their radial gradients fade out — far-from-cities areas keep the biome colour. */}
+      {/* Built-up areas: irregular polygons per city (rank-scaled radius,
+          seeded jitter), clipped to this country. Replaces circular blobs. */}
       <g clipPath={`url(#${clipId})`}>
-        {cities.map((c) => (
-          <circle
-            key={c.id}
-            cx={c.position[0]}
-            cy={c.position[1]}
-            r={civ.blobRadius}
-            fill={`url(#${gradientId})`}
-          />
-        ))}
+        {cities.map((c) => {
+          const poly = builtUpPolygon(c.position, builtUpRadius(c.rank), hashStr(c.id));
+          return <path key={c.id} d={smoothPath(poly)} fill={civ.blobColor} />;
+        })}
       </g>
 
       {/* Country border (drawn over the biome+blobs) */}

@@ -5,11 +5,8 @@ import { select } from "d3-selection";
 import { zoom, zoomIdentity, type ZoomBehavior } from "d3-zoom";
 import type { SampleMap } from "@/types/atlas";
 import { AtlasDefs, MapBackdrop } from "./AtlasDefs";
-import { Sea } from "./Sea";
 import { Country } from "./Country";
 import { River } from "./River";
-import { MountainRange } from "./MountainRange";
-import { Compass } from "./Compass";
 import { City } from "./City";
 import { Road } from "./Road";
 import { Legend } from "./Legend";
@@ -85,7 +82,6 @@ export function Atlas({ map }: { map: SampleMap }) {
         <AtlasDefs />
         <g ref={contentRef}>
           <MapBackdrop width={width} height={height} />
-          <Sea width={width} height={height} color={map.sea.color} />
           {map.countries.map((c) => (
             <Country
               key={c.id}
@@ -97,9 +93,7 @@ export function Atlas({ map }: { map: SampleMap }) {
           {map.rivers.map((r) => (
             <River key={r.id} data={r} />
           ))}
-          {map.mountainRanges.map((m) => (
-            <MountainRange key={m.id} data={m} />
-          ))}
+          {/* MountainRange: hidden (old-map element, replaced by Google-Maps style). */}
           {map.roads.map((r, i) => (
             <Road key={r.id} data={r} cityById={cityById} scale={scale} number={i + 1} />
           ))}
@@ -121,9 +115,7 @@ export function Atlas({ map }: { map: SampleMap }) {
         <span className="font-medium">{map.title}</span>
       </div>
 
-      <div className="absolute top-3 right-3">
-        <Compass size={40} />
-      </div>
+      {/* Compass: hidden (decorative compass roses are forbidden in modern map style). */}
 
       {/* Zoom controls — bottom-right, like Google Maps */}
       <div className="absolute bottom-6 right-3 flex flex-col rounded-md overflow-hidden shadow-md bg-white">
