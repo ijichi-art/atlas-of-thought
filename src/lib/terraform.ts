@@ -77,15 +77,25 @@ type AiEdge = {
   concept: string;
 };
 
-type AiResult = {
+type AiSkipItem = { conversationIndex: number; reason: string };
+
+export type AiResult = {
   countries: AiCountry[];
   cities: AiCity[];
   edges?: AiEdge[];
+  // Layer 2 skip lists. Populated only when a non-empty user directive
+  // was passed to clusterWithAI.
+  skipDefinitive?: AiSkipItem[];
+  skipAmbiguous?: AiSkipItem[];
 };
 
 // ── Prompt ────────────────────────────────────────────────────────────────────
 
-async function clusterWithAI(convs: ConvInput[], ai: AiClient): Promise<AiResult> {
+async function clusterWithAI(
+  convs: ConvInput[],
+  ai: AiClient,
+  directive: string | null = null,
+): Promise<AiResult> {
   const system = `You are a master cartographer of thought. Given AI conversation transcripts, you design a hierarchical "map of mind" — countries (themes), districts (sub-themes), cities (individual conversations), and edges (semantic links between conversations).
 
 Output JSON only — no markdown, no commentary, no fences. Be precise and exhaustive.`;
@@ -99,6 +109,38 @@ Output JSON only — no markdown, no commentary, no fences. Be precise and exhau
 
   const colorList = COUNTRY_COLORS.join(", ");
   const maxCountries = Math.min(8, Math.max(3, Math.ceil(convs.length / 3)));
+
+  // Layer 2: optional natural-language exclusion directive. The LLM splits
+  // matches into definitive (>=80% confident) vs ambiguous (30-80%) so the
+  // user can confirm. We forbid the LLM from adding privacy/safety judgment
+  // of its own — only the user's directive controls skipping. Guards
+  // against over-cutting.
+  const directiveTrimmed = (directive ?? "").trim();
+  const directiveBlock = directiveTrimmed
+    ? `
+
+USER EXCLUSION DIRECTIVE (apply during cartography):
+${directiveTrimmed}
+
+Apply this directive as follows:
+- Mark conversations as "skipDefinitive" ONLY if the directive clearly applies (>=80% confident).
+- Mark as "skipAmbiguous" if the directive might apply but you're unsure (30-80% confident).
+- If under 30% confident, do NOT skip — leave the conversation in the normal flow.
+- Do NOT skip on your own judgment of sensitivity, privacy, or safety. Only skip per the directive above.
+- Each skip item must include a 1-sentence "reason".
+- Skipped conversations should still appear in cities[] and in some district's cityIndexes
+  (so the user can later un-skip them); the skip lists are advisory metadata.`
+    : "";
+
+  const skipSchemaBlock = directiveTrimmed
+    ? `,
+  "skipDefinitive": [
+    { "conversationIndex": 3, "reason": "Directly mentions Acme Corp, which the directive excludes." }
+  ],
+  "skipAmbiguous": [
+    { "conversationIndex": 7, "reason": "Touches on a project codename that may relate to the excluded scope." }
+  ]`
+    : "";
 
   const user = `Conversations (${convs.length} total). Each is identified by [N]:
 ${convList}
@@ -161,8 +203,8 @@ Output JSON only, this exact shape:
   ],
   "edges": [
     { "fromCity": 0, "toCity": 5, "type": "highway", "concept": "shared OAuth provider integration" }
-  ]
-}`;
+  ]${skipSchemaBlock}
+}${directiveBlock}`;
 
   let raw = "";
   for await (const chunk of ai.stream({
@@ -826,9 +868,40 @@ export type TerraformResult = {
   roadsCreated: number;
   roadsCandidates: number; // before pruning — useful to see how aggressive the filter was
   conversationsPlaced: number;
+  conversationsSkipped: number;
 };
 
-export async function terraform(mapId: string, ai: AiClient): Promise<TerraformResult> {
+// Per-skip metadata returned to the client for the confirmation modal.
+export type SkipItem = {
+  convIdx: number;
+  convId: string;
+  title: string | null;
+  reason: string;
+};
+
+// Result of the preview pass: cartographer proposal + skip lists derived
+// from the user directive. The client uses this to render the confirmation
+// modal and posts back the chosen skipConvIdx[] on commit.
+export type TerraformPreview = {
+  aiResult: AiResult;
+  // Conversation IDs in the order they were given to the LLM. Sent back on
+  // commit so we can detect whether the underlying conversation set changed
+  // between preview and commit (in which case the cached aiResult is stale).
+  conversationIds: string[];
+  skipDefinitive: SkipItem[];
+  skipAmbiguous: SkipItem[];
+};
+
+// Two terraform modes:
+//   A) Fresh: leave aiResult unset; LLM runs with `directive`.
+//   B) From preview: pass `aiResult` + `skipConvIdx`; LLM is NOT re-called.
+export type TerraformInput = {
+  aiResult?: AiResult;
+  skipConvIdx?: number[];
+  directive?: string | null;
+};
+
+async function loadConvInputs(mapId: string): Promise<ConvInput[]> {
   const allConvs = await prisma.conversation.findMany({
     where: { mapId, source: { not: "native" } },
     select: {
@@ -843,11 +916,7 @@ export async function terraform(mapId: string, ai: AiClient): Promise<TerraformR
     take: 50,
   });
 
-  if (allConvs.length === 0) {
-    return { countriesCreated: 0, citiesCreated: 0, roadsCreated: 0, roadsCandidates: 0, conversationsPlaced: 0 };
-  }
-
-  const inputs: ConvInput[] = allConvs.map((c) => {
+  return allConvs.map((c) => {
     const userMsgs = c.messages.filter((m) => m.role === "user");
     const preview = (userMsgs[0]?.text ?? c.messages[0]?.text ?? "").slice(0, 280);
     const totalChars = c.messages.reduce((s, m) => s + m.text.length, 0);
@@ -859,9 +928,100 @@ export async function terraform(mapId: string, ai: AiClient): Promise<TerraformR
       totalChars,
     };
   });
+}
 
-  const aiResult = await clusterWithAI(inputs, ai);
+// Preview: run the cartographer LLM only, persist the directive, return the
+// proposal plus structured skip lists for the confirmation UI. No geography
+// is written to the DB until the client follows up with terraform(... opts).
+export async function terraformPreview(
+  mapId: string,
+  ai: AiClient,
+  directive: string | null,
+): Promise<TerraformPreview> {
+  const inputs = await loadConvInputs(mapId);
+
+  await prisma.map.update({
+    where: { id: mapId },
+    data: { exclusionDirective: directive?.trim() ? directive.trim() : null },
+  });
+
+  if (inputs.length === 0) {
+    return {
+      aiResult: { countries: [], cities: [] },
+      conversationIds: [],
+      skipDefinitive: [],
+      skipAmbiguous: [],
+    };
+  }
+
+  const aiResult = await clusterWithAI(inputs, ai, directive);
+
+  const enrich = (item: AiSkipItem): SkipItem | null => {
+    const i = item.conversationIndex;
+    if (!Number.isInteger(i) || i < 0 || i >= inputs.length) return null;
+    return {
+      convIdx: i,
+      convId: inputs[i].id,
+      title: inputs[i].title,
+      reason: typeof item.reason === "string" ? item.reason : "",
+    };
+  };
+
+  const skipDefinitive = (aiResult.skipDefinitive ?? [])
+    .map(enrich)
+    .filter((x): x is SkipItem => x !== null);
+  const skipAmbiguous = (aiResult.skipAmbiguous ?? [])
+    .map(enrich)
+    .filter((x): x is SkipItem => x !== null);
+
+  return {
+    aiResult,
+    conversationIds: inputs.map((c) => c.id),
+    skipDefinitive,
+    skipAmbiguous,
+  };
+}
+
+export async function terraform(
+  mapId: string,
+  ai: AiClient,
+  opts: TerraformInput = {},
+): Promise<TerraformResult> {
+  const inputs = await loadConvInputs(mapId);
+
+  if (inputs.length === 0) {
+    return {
+      countriesCreated: 0,
+      citiesCreated: 0,
+      roadsCreated: 0,
+      roadsCandidates: 0,
+      conversationsPlaced: 0,
+      conversationsSkipped: 0,
+    };
+  }
+
+  // Use the cartographer's preview output if provided; otherwise call the LLM.
+  const aiResult =
+    opts.aiResult ?? (await clusterWithAI(inputs, ai, opts.directive ?? null));
+
+  // Persist the directive on this fresh path too, so re-terraform pre-fills it.
+  if (opts.directive !== undefined) {
+    await prisma.map.update({
+      where: { id: mapId },
+      data: {
+        exclusionDirective: opts.directive?.trim() ? opts.directive.trim() : null,
+      },
+    });
+  }
+
   const assignments = assignAll(aiResult, inputs.length);
+
+  // Layer 2 skip: drop these conversations from city placement. Roads
+  // referencing them won't be created (cityIdByConvIdx miss); any country
+  // emptied by skipping is dropped at the country-creation step.
+  const skipSet = new Set(opts.skipConvIdx ?? []);
+  for (const idx of skipSet) assignments.delete(idx);
+  const conversationsSkipped = skipSet.size;
 
   const seedParts = inputs.map((c) => c.id);
   const { positions, countryCenters } = layoutAll(aiResult, assignments, seedParts);
@@ -1120,5 +1280,6 @@ export async function terraform(mapId: string, ai: AiClient): Promise<TerraformR
     roadsCreated: roadIds.length,
     roadsCandidates: candidates.length,
     conversationsPlaced: cityIdByConvIdx.size,
+    conversationsSkipped,
   };
 }
