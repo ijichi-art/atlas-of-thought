@@ -159,6 +159,10 @@ model Map {
   title      String     @default("My Atlas")
   visibility Visibility @default(private)
   shareSlug  String?    @unique
+  // Natural-language directive ("skip anything about X") applied by the
+  // cartographer LLM during terraform. Persisted so re-terraform can
+  // pre-fill it for editing. Layer 2 of the privacy pipeline.
+  exclusionDirective String?
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt
 
