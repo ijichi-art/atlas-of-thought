@@ -18,6 +18,7 @@ export default async function UserAtlasPage({ params }: { params: Promise<{ mapI
     select: {
       id: true,
       title: true,
+      exclusionDirective: true,
       _count: { select: { conversations: true, cities: true } },
     },
   });
@@ -41,6 +42,7 @@ export default async function UserAtlasPage({ params }: { params: Promise<{ mapI
             mapId={map.id}
             conversationCount={map._count.conversations}
             cityCount={map._count.cities}
+            initialDirective={map.exclusionDirective ?? ""}
           />
         </div>
       </header>
