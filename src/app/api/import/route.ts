@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { parseContent, type KnownSource } from "@/lib/parsers";
 import type { ParseIssue } from "@/lib/parsers/types";
 import type { SourceType } from "@/generated/prisma/client";
+import { redactSecrets, type RedactionEvent } from "@/lib/secret-redact";
 
 // Map parser source strings to the DB enum values.
 const SOURCE_MAP: Record<string, SourceType> = {
@@ -88,9 +89,23 @@ export async function POST(req: Request) {
   let skipped = 0;
   let totalTokens = 0;
   const dbIssues: ParseIssue[] = [];
+  // Layer 1 secret redaction stats — surfaced in the response so the
+  // importing user can see what was stripped without ever seeing the
+  // values themselves.
+  const redactionTotals = new Map<string, number>();
 
   for (const conv of conversations) {
-    totalTokens += conv.messages.reduce((sum, m) => sum + estimateTokens(m.text), 0);
+    // Redact secrets in every message body before persisting. Format-only
+    // matching: deterministic patterns from src/lib/secret-redact.ts.
+    const redactedMessages = conv.messages.map((m) => {
+      const r = redactSecrets(m.text);
+      for (const ev of r.events) {
+        redactionTotals.set(ev.kind, (redactionTotals.get(ev.kind) ?? 0) + ev.count);
+      }
+      return { ...m, text: r.text };
+    });
+
+    totalTokens += redactedMessages.reduce((sum, m) => sum + estimateTokens(m.text), 0);
     const dbSource = toSourceType(conv.source);
 
     try {
@@ -115,7 +130,7 @@ export async function POST(req: Request) {
             title: conv.title,
             createdAtSource: conv.createdAt ?? null,
             messages: {
-              create: conv.messages.map((m, i) => ({
+              create: redactedMessages.map((m, i) => ({
                 ordinal: i,
                 role: m.role,
                 text: m.text,
@@ -137,10 +152,16 @@ export async function POST(req: Request) {
     }
   }
 
+  const redactions: RedactionEvent[] = Array.from(redactionTotals, ([kind, count]) => ({
+    kind: kind as RedactionEvent["kind"],
+    count,
+  }));
+
   return NextResponse.json({
     imported,
     skipped,
     issues: [...issues, ...dbIssues],
     estimatedTokens: totalTokens,
+    redactions,
   });
 }
