@@ -240,13 +240,13 @@ export function ImportForm({ maps }: { maps: MapMeta[] }) {
                 ref={fileInputRef}
                 type="file"
                 multiple
-                accept=".json,.jsonl,.txt"
+                accept=".json,.jsonl,.txt,.html,.htm"
                 className="hidden"
                 onChange={(e) => addFiles(e.target.files)}
               />
               <div className="text-stone-400 text-sm space-y-1">
                 <div>Drop files here, or click to browse</div>
-                <div className="text-xs">.json · .jsonl · .txt — multiple allowed</div>
+                <div className="text-xs">.json · .jsonl · .txt · .html — multiple allowed</div>
               </div>
             </div>
 
