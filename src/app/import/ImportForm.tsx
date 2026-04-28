@@ -17,10 +17,11 @@ const SOURCE_OPTIONS = [
   { value: "chatgpt", label: "ChatGPT export (conversations.json)" },
   { value: "claude", label: "Claude.ai export (conversations.json)" },
   { value: "claude_code", label: "Claude Code session (.jsonl)" },
+  { value: "gemini", label: "Gemini Apps Activity (Google Takeout .html)" },
   { value: "paste", label: "Pasted transcript" },
 ];
 
-const ACCEPTED_EXT = /\.(json|jsonl|txt)$/i;
+const ACCEPTED_EXT = /\.(json|jsonl|txt|html?)$/i;
 
 export function ImportForm({ maps }: { maps: MapMeta[] }) {
   const [mode, setMode] = useState<"file" | "text">("file");

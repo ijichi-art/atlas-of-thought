@@ -17,7 +17,7 @@ export type NormalizedArtifact = {
 };
 
 export type NormalizedConversation = {
-  source: "chatgpt" | "claude" | "claude_code" | "cursor" | "manual";
+  source: "chatgpt" | "claude" | "claude_code" | "cursor" | "gemini" | "manual";
   // Upstream identifier, used for deduplication on re-import.
   externalId: string;
   title: string;

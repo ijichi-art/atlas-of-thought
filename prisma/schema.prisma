@@ -135,6 +135,7 @@ enum SourceType {
   claude
   claude_code
   cursor
+  gemini
   manual
   native
 }

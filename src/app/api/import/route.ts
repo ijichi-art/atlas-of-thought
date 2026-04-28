@@ -11,6 +11,7 @@ const SOURCE_MAP: Record<string, SourceType> = {
   chatgpt: "chatgpt",
   claude: "claude",
   claude_code: "claude_code",
+  gemini: "gemini",
   manual: "manual",
 };
 
@@ -78,7 +79,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Map not found" }, { status: 404 });
   }
 
-  const knownSources = new Set<string>(["chatgpt", "claude", "claude_code", "paste", "auto"]);
+  const knownSources = new Set<string>(["chatgpt", "claude", "claude_code", "gemini", "paste", "auto"]);
   const safeSource: KnownSource | "auto" = knownSources.has(source)
     ? (source as KnownSource | "auto")
     : "auto";

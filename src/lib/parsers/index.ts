@@ -3,12 +3,22 @@ import { parseChatGPTExport } from "./chatgpt";
 import { parseClaudeExport } from "./claude";
 import { parseClaudeCodeLog } from "./claude-code";
 import { parsePastedTranscript } from "./paste";
+import { parseGeminiHtml } from "./gemini";
 
-export type KnownSource = "chatgpt" | "claude" | "claude_code" | "paste";
+export type KnownSource = "chatgpt" | "claude" | "claude_code" | "gemini" | "paste";
 
 // Heuristic: peek at the raw string to guess its format.
 export function detectSource(raw: string): KnownSource {
   const trimmed = raw.trimStart();
+
+  // HTML → Google Takeout (Gemini Apps Activity)
+  if (
+    trimmed.startsWith("<!DOCTYPE") ||
+    trimmed.startsWith("<html") ||
+    /<div class="outer-cell/i.test(trimmed.slice(0, 5000))
+  ) {
+    return "gemini";
+  }
 
   // JSON array → Claude or ChatGPT export
   if (trimmed.startsWith("[")) {
@@ -97,6 +107,8 @@ export function parseContent(raw: string, opts: ParseOptions = {}): ParseResult 
     }
     case "claude_code":
       return parseClaudeCodeLog(raw, { externalId: opts.externalId, title: opts.title });
+    case "gemini":
+      return parseGeminiHtml(raw);
     case "paste":
     default:
       return parsePastedTranscript(raw, { externalId: opts.externalId, title: opts.title });
