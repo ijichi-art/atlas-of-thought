@@ -89,6 +89,71 @@ export type AiResult = {
   skipAmbiguous?: AiSkipItem[];
 };
 
+// ── JSON repair ───────────────────────────────────────────────────────────────
+//
+// LLM output sometimes gets cut off mid-array (output budget exhausted while
+// the model was still emitting). We walk the bytes tracking depth + string
+// state, snip back to the most recent completed value at the outermost depth,
+// then close any remaining open arrays / objects so the result is parseable.
+// Returns null if the structure is too badly mangled to recover.
+export function repairTruncatedJson(input: string): unknown | null {
+  let inString = false;
+  let escape = false;
+  // Stack of open brackets ('[' or '{') with the index of the opening char.
+  // We also track, for each frame, the position of the last comma at THAT
+  // depth — that's where we'd snip to drop the partial element.
+  const stack: Array<{ open: "[" | "{"; lastSafeEnd: number }> = [];
+  // Index of the last char that completes a top-level value at depth 1
+  // (i.e. directly inside the outermost { ... }). Snipping here keeps every
+  // complete top-level field of the response.
+  let lastCompleteAtTop = -1;
+
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (inString) {
+      if (ch === "\\") escape = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === "[" || ch === "{") {
+      stack.push({ open: ch, lastSafeEnd: -1 });
+      continue;
+    }
+    if (ch === "]" || ch === "}") {
+      stack.pop();
+      // After closing, if we're back at depth 1, this position completes a
+      // top-level value (countries[], cities[], a country object, etc.).
+      if (stack.length === 1) {
+        lastCompleteAtTop = i;
+      }
+      continue;
+    }
+    if (ch === "," && stack.length === 1) {
+      // Comma at depth 1 (between top-level fields) — the field BEFORE this
+      // comma was complete. Mark this as the last safe end (just before comma).
+      lastCompleteAtTop = i - 1;
+    }
+  }
+
+  if (lastCompleteAtTop < 0) return null;
+  // Snip up to and including the last complete top-level value, then close
+  // the outermost object.
+  const head = input.slice(0, lastCompleteAtTop + 1) + "}";
+  try {
+    return JSON.parse(head);
+  } catch {
+    return null;
+  }
+}
+
 // ── Prompt ────────────────────────────────────────────────────────────────────
 
 // Information passed to clusterWithAI when this call is one batch of a larger
@@ -251,7 +316,11 @@ Output JSON only, this exact shape:
   for await (const chunk of ai.stream({
     system,
     messages: [{ role: "user", content: user }],
-    maxTokens: 16384,
+    // 32k gives enough headroom for DeepSeek R1's reasoning tokens (typ.
+    // 5-12k) PLUS the structured-JSON output for a 50-conv batch (~5-6k).
+    // Earlier 16k was tight: when reasoning ran long, the output got cut
+    // off mid-array and the parse failed for half the batches.
+    maxTokens: 32000,
     jsonMode: true,
   })) {
     raw += chunk;
@@ -263,10 +332,18 @@ Output JSON only, this exact shape:
   let parsed: AiResult;
   try {
     parsed = JSON.parse(jsonMatch[0]) as AiResult;
-  } catch (err) {
-    throw new Error(
-      `AI returned invalid JSON: ${err instanceof Error ? err.message : err}. Snippet: ${jsonMatch[0].slice(0, 300)}`,
-    );
+  } catch {
+    // Try to recover from a truncated response (LLM cut off mid-array). We
+    // walk the JSON tracking depth + string state, find the position of the
+    // last completed value at depth 1, then close the structure from there.
+    // A degraded result is still useful — better than dropping the whole batch.
+    const repaired = repairTruncatedJson(jsonMatch[0]);
+    if (repaired === null) {
+      throw new Error(
+        `AI returned invalid JSON. Snippet: ${jsonMatch[0].slice(0, 300)}`,
+      );
+    }
+    parsed = repaired as AiResult;
   }
 
   if (!Array.isArray(parsed.countries) || parsed.countries.length === 0) {
@@ -289,8 +366,12 @@ Output JSON only, this exact shape:
 // LOCAL conversationIndex / fromCity / toCity values to GLOBAL indices, and
 // fix up post-merge invariants (≤1 capital per country).
 
-const BATCH_SIZE = 80;
-const SINGLE_CALL_THRESHOLD = 100; // ≤ this many conversations → single LLM call
+// Per-batch size. Lower = more LLM calls but each call's output is smaller,
+// keeping us well below DeepSeek R1's combined reasoning+output budget.
+// 50 conversations produces ~5-6k tokens of structured JSON, which leaves
+// plenty of headroom for R1's reasoning tokens within 32k max_tokens.
+export const BATCH_SIZE = 50;
+const SINGLE_CALL_THRESHOLD = 60; // ≤ this many conversations → single LLM call
 const MAX_COUNTRIES_TOTAL = 12;
 
 export async function clusterBatched(
