@@ -4,6 +4,7 @@ import { parseClaudeExport } from "./claude";
 import { parseClaudeCodeLog } from "./claude-code";
 import { parsePastedTranscript } from "./paste";
 import { parseGeminiHtml } from "./gemini";
+import { parseGeminiWorkspace } from "./gemini-workspace";
 
 export type KnownSource = "chatgpt" | "claude" | "claude_code" | "gemini" | "paste";
 
@@ -47,7 +48,7 @@ export function detectSource(raw: string): KnownSource {
       }
     }
 
-    // Single JSON object → Claude or ChatGPT (single-conversation form)
+    // Single JSON object → Claude / ChatGPT (single-conversation) / Gemini Workspace
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
@@ -62,6 +63,7 @@ export function detectSource(raw: string): KnownSource {
       return "paste";
     }
     const obj = parsed as Record<string, unknown>;
+    if ("conversation_turns" in obj) return "gemini"; // Workspace export
     if ("chat_messages" in obj) return "claude";
     if ("mapping" in obj) return "chatgpt";
     return "paste";
@@ -107,8 +109,16 @@ export function parseContent(raw: string, opts: ParseOptions = {}): ParseResult 
     }
     case "claude_code":
       return parseClaudeCodeLog(raw, { externalId: opts.externalId, title: opts.title });
-    case "gemini":
+    case "gemini": {
+      // Two distinct formats live under the same source:
+      //   - HTML (Google Takeout "Gemini Apps Activity")
+      //   - JSON in a .txt file (Gemini in Workspace conversation export)
+      const t = raw.trimStart();
+      if (t.startsWith("{") || t.startsWith("[")) {
+        return parseGeminiWorkspace(raw);
+      }
       return parseGeminiHtml(raw);
+    }
     case "paste":
     default:
       return parsePastedTranscript(raw, { externalId: opts.externalId, title: opts.title });
