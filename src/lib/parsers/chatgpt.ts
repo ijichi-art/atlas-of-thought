@@ -186,3 +186,76 @@ export function parseChatGPTExport(input: unknown): ParseResult {
   }
   return { conversations, issues };
 }
+
+// ChatGPT exports also include a self-contained chat.html that bundles the
+// SAME conversation data as the conversations-NNN.json files, embedded as a
+// `var jsonData = [...]` block followed by rendering JS in the same <script>
+// tag. We walk the brackets to find the matching `]` for the opening `[` —
+// regex with [\s\S]*? would stop at the first `]` inside a JSON string.
+function extractJsonArrayAfter(haystack: string, prefixRe: RegExp): string | null {
+  const m = haystack.match(prefixRe);
+  if (!m || m.index === undefined) return null;
+  // Find the first '[' or '{' after the prefix match.
+  let i = m.index + m[0].length;
+  while (i < haystack.length && haystack[i] !== "[" && haystack[i] !== "{") i++;
+  if (i >= haystack.length) return null;
+  const start = i;
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (; i < haystack.length; i++) {
+    const ch = haystack[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (inString) {
+      if (ch === "\\") escape = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === "[" || ch === "{") depth++;
+    else if (ch === "]" || ch === "}") {
+      depth--;
+      if (depth === 0) return haystack.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+export function parseChatGPTHtml(raw: string): ParseResult {
+  const arrText = extractJsonArrayAfter(raw, /var\s+jsonData\s*=\s*/);
+  if (!arrText) {
+    return {
+      conversations: [],
+      issues: [
+        {
+          level: "error",
+          code: "no_jsondata",
+          message:
+            "Couldn't find embedded conversation data in this HTML. If this is a ChatGPT export, prefer the conversations-NNN.json files instead.",
+        },
+      ],
+    };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(arrText);
+  } catch (err) {
+    return {
+      conversations: [],
+      issues: [
+        {
+          level: "error",
+          code: "json_parse_error",
+          message: `Couldn't parse the embedded JSON: ${err instanceof Error ? err.message : String(err)}`,
+        },
+      ],
+    };
+  }
+  return parseChatGPTExport(parsed);
+}

@@ -1,5 +1,5 @@
 import type { ParseResult } from "./types";
-import { parseChatGPTExport } from "./chatgpt";
+import { parseChatGPTExport, parseChatGPTHtml } from "./chatgpt";
 import { parseClaudeExport } from "./claude";
 import { parseClaudeCodeLog } from "./claude-code";
 import { parsePastedTranscript } from "./paste";
@@ -12,12 +12,20 @@ export type KnownSource = "chatgpt" | "claude" | "claude_code" | "gemini" | "pas
 export function detectSource(raw: string): KnownSource {
   const trimmed = raw.trimStart();
 
-  // HTML → Google Takeout (Gemini Apps Activity)
+  // HTML — could be ChatGPT's chat.html OR a Google Takeout Gemini Apps export.
+  // Distinguish by content sniffing in the first chunk.
   if (
     trimmed.startsWith("<!DOCTYPE") ||
     trimmed.startsWith("<html") ||
     /<div class="outer-cell/i.test(trimmed.slice(0, 5000))
   ) {
+    const head = trimmed.slice(0, 5000);
+    if (
+      /var\s+jsonData\s*=\s*\[/.test(head) ||
+      /<title>\s*ChatGPT Data Export\s*<\/title>/i.test(head)
+    ) {
+      return "chatgpt";
+    }
     return "gemini";
   }
 
@@ -66,6 +74,10 @@ export function detectSource(raw: string): KnownSource {
     if ("conversation_turns" in obj) return "gemini"; // Workspace export
     if ("chat_messages" in obj) return "claude";
     if ("mapping" in obj) return "chatgpt";
+    // ChatGPT export_manifest.json — list of file paths, no conversation data.
+    // Detected by the export_files array; routed to paste only so parseContent
+    // can emit a clear "this is a manifest" error.
+    if ("export_files" in obj && Array.isArray(obj.export_files)) return "paste";
     return "paste";
   }
 
@@ -79,6 +91,27 @@ type ParseOptions = {
 };
 
 export function parseContent(raw: string, opts: ParseOptions = {}): ParseResult {
+  // Specific-format reject: ChatGPT's export_manifest.json is a file listing,
+  // not conversations. Catch it up front so we don't dump a confusing
+  // "no role labels" warning from the paste parser.
+  const trimmedHead = raw.trimStart().slice(0, 1024);
+  if (
+    trimmedHead.startsWith("{") &&
+    /"export_files"\s*:\s*\[/.test(trimmedHead)
+  ) {
+    return {
+      conversations: [],
+      issues: [
+        {
+          level: "error",
+          code: "manifest_only",
+          message:
+            "This file is the ChatGPT export manifest (a list of file paths), not conversation data. Skip it and import the conversations-NNN.json files (or chat.html) instead.",
+        },
+      ],
+    };
+  }
+
   const source: KnownSource =
     !opts.source || opts.source === "auto" ? detectSource(raw) : opts.source;
 
@@ -96,6 +129,12 @@ export function parseContent(raw: string, opts: ParseOptions = {}): ParseResult 
       return parseClaudeExport(parsed);
     }
     case "chatgpt": {
+      // Two formats land here: chat.html (single-file export with embedded
+      // JSON) and conversations-NNN.json.
+      const t = raw.trimStart();
+      if (t.startsWith("<")) {
+        return parseChatGPTHtml(raw);
+      }
       let parsed: unknown;
       try {
         parsed = JSON.parse(raw);
