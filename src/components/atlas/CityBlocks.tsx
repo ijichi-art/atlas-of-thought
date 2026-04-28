@@ -69,7 +69,12 @@ export function CityBlocks({ cities, scale }: { cities: CityData[]; scale: numbe
   // Towns are too small for an internal grid (single block at most).
   const eligible = cities.filter((c) => c.rank !== "town");
 
-  const arterialStyle = ATLAS_STYLE.road.regular;
+  // City grid is uniformly the collector style (white + light casing).
+  // Through-streets (the two center axes that streetGrid returns as
+  // `arterials`) render in the SAME white style so the inside of a city
+  // reads as a flat grid rather than two yellow trunks bisecting the blocks.
+  // Inter-city arterials (yellow) are rendered separately by Road.tsx and
+  // pass over the grid where applicable.
   const collectorStyle = ATLAS_STYLE.road.trail;
 
   return (
@@ -98,9 +103,9 @@ export function CityBlocks({ cities, scale }: { cities: CityData[]; scale: numbe
               />
               <StreetSegments
                 segments={grid.arterials}
-                fillColor={arterialStyle.fill.color}
-                fillWidth={arterialStyle.fill.width}
-                casing={arterialStyle.casing}
+                fillColor={collectorStyle.fill.color}
+                fillWidth={collectorStyle.fill.width}
+                casing={collectorStyle.casing}
                 keyPrefix="art"
               />
             </g>
