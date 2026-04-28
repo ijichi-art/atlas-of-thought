@@ -2,14 +2,14 @@ import type { CityData, RoadData } from "@/types/atlas";
 import { ATLAS_STYLE } from "@/lib/atlas-style";
 
 // Per-segment quadratic-bezier path. Each segment (W_i → W_{i+1}) gets a
-// control point that is the segment midpoint pushed perpendicular by an
-// amount derived from a hash of the two endpoints. This preserves FDEB-style
-// bundling: roads sharing a (W_i, W_{i+1}) trunk segment hash to the SAME
-// control point and render the EXACT same curve. They diverge only at the
-// city endpoints, where each road's first/last segment is unique to it.
-//
-// `magnitude` is a per-road-type fraction (0.05–0.30): highways stay direct,
-// local trails wander more.
+// control point that is the segment midpoint pushed perpendicular. Both the
+// magnitude AND the side of the perpendicular are derived from a hash of the
+// two endpoints — i.e. the curve is a property of the SEGMENT, not the road.
+// This is what makes bundling actually work: when two roads share a trunk
+// segment (same endpoints, often after bundleSharedTrunks insertion), they
+// render BIT-IDENTICALLY on that segment regardless of road type. Earlier
+// versions varied magnitude by road type, which produced ghost-parallel
+// strokes whenever a highway and an arterial bundled onto a shared trunk.
 function hashSegment(p1: [number, number], p2: [number, number]): number {
   // Order-independent: segment (A,B) hashes the same as (B,A).
   const [a, b] = p1[0] + p1[1] * 1e3 < p2[0] + p2[1] * 1e3 ? [p1, p2] : [p2, p1];
@@ -24,7 +24,6 @@ function hashSegment(p1: [number, number], p2: [number, number]): number {
 function controlPoint(
   p1: [number, number],
   p2: [number, number],
-  magnitude: number,
 ): [number, number] {
   const dx = p2[0] - p1[0];
   const dy = p2[1] - p1[1];
@@ -32,21 +31,23 @@ function controlPoint(
   const mx = (p1[0] + p2[0]) / 2;
   const my = (p1[1] + p2[1]) / 2;
   if (len < 1) return [mx, my];
-  // Perpendicular unit vector.
   const nx = -dy / len;
   const ny = dx / len;
   const h = hashSegment(p1, p2);
-  // Map hash → signed [-1, 1] so curves bend either side of the line.
-  const signed = ((h % 2000) / 1000) - 1;
+  // Magnitude in [0.07, 0.20] from the low bits of the hash; signed bend
+  // direction from the high bits. Variety per segment, but consistent
+  // across any road that traces it.
+  const magnitude = 0.07 + ((h & 0xff) / 0xff) * 0.13;
+  const signed = ((((h >>> 8) & 0xffff) % 2000) / 1000) - 1;
   const offset = magnitude * len * signed;
   return [mx + nx * offset, my + ny * offset];
 }
 
-function smoothPath(points: [number, number][], magnitude: number): string {
+function smoothPath(points: [number, number][]): string {
   if (points.length < 2) return "";
   let path = `M ${points[0][0]} ${points[0][1]}`;
   for (let i = 1; i < points.length; i++) {
-    const [cx, cy] = controlPoint(points[i - 1], points[i], magnitude);
+    const [cx, cy] = controlPoint(points[i - 1], points[i]);
     path += ` Q ${cx.toFixed(2)} ${cy.toFixed(2)} ${points[i][0]} ${points[i][1]}`;
   }
   return path;
@@ -76,7 +77,7 @@ export function Road({
     ...(data.waypoints ?? []),
     to.position,
   ];
-  const d = smoothPath(points, style.curveOffset);
+  const d = smoothPath(points);
   const inv = 1 / scale;
 
   // Midpoint of the line (close enough — for waypoint-less roads it's exact).

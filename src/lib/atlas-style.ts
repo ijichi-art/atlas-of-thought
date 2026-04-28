@@ -180,31 +180,28 @@ export const ATLAS_STYLE = {
   // Type mapping (existing RoadType → road hierarchy):
   //   highway → highway, regular → arterial, trail → collector, ferry → transit
   road: {
+    // Curve magnitude is no longer per type — Road.tsx now derives the
+    // bezier control point from the segment endpoints alone, so any roads
+    // sharing a trunk segment trace identical curves regardless of type.
     highway: {
       casing: { color: "#e89c30", width: 8 } as { color: string; width: number } | undefined,
       fill: { color: "#fbcd5d", width: 6, dash: undefined as string | undefined, opacity: 1 },
       minScale: 0,
-      // Perpendicular control-point offset as a fraction of segment length.
-      // Lower = straighter (highways are direct). See Road.tsx smoothPath.
-      curveOffset: 0.06,
     },
     regular: {
       casing: { color: "#e8c878", width: 6 } as { color: string; width: number } | undefined,
       fill: { color: "#fde2a0", width: 4, dash: undefined as string | undefined, opacity: 1 },
       minScale: 0.4,
-      curveOffset: 0.10,
     },
     trail: {
       casing: { color: "#d8d4ca", width: 4 } as { color: string; width: number } | undefined,
       fill: { color: "#ffffff", width: 2.5, dash: undefined as string | undefined, opacity: 1 },
       minScale: 0.8,
-      curveOffset: 0.18,
     },
     ferry: {
       casing: undefined as undefined | { color: string; width: number },
       fill: { color: "#1976d2", width: 1.5, dash: "4 3" as string | undefined, opacity: 0.9 },
       minScale: 0.7,
-      curveOffset: 0.10,
     },
   },
 
