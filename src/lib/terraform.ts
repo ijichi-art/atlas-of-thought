@@ -39,7 +39,7 @@ const COUNTRY_COLORS = [
 
 // ── AI types ──────────────────────────────────────────────────────────────────
 
-type ConvInput = {
+export type ConvInput = {
   id: string;
   title: string | null;
   preview: string;
@@ -91,10 +91,24 @@ export type AiResult = {
 
 // ── Prompt ────────────────────────────────────────────────────────────────────
 
+// Information passed to clusterWithAI when this call is one batch of a larger
+// terraform run (see clusterBatched). Drives prompt adjustments so the LLM
+// reuses already-named countries instead of creating fresh ones each batch.
+type BatchContext = {
+  existingCountries: Array<{ name: string; theme: string; color?: string }>;
+  batchNumber: number; // 1-based
+  totalBatches: number;
+  globalConvCount: number; // total across all batches
+  // Hard cap on country count across all batches. The LLM is told to prefer
+  // reusing existing ones once we're approaching this number.
+  maxCountriesTotal: number;
+};
+
 async function clusterWithAI(
   convs: ConvInput[],
   ai: AiClient,
   directive: string | null = null,
+  batchCtx: BatchContext | null = null,
 ): Promise<AiResult> {
   const system = `You are a master cartographer of thought. Given AI conversation transcripts, you design a hierarchical "map of mind" — countries (themes), districts (sub-themes), cities (individual conversations), and edges (semantic links between conversations).
 
@@ -108,7 +122,34 @@ Output JSON only — no markdown, no commentary, no fences. Be precise and exhau
     .join("\n");
 
   const colorList = COUNTRY_COLORS.join(", ");
-  const maxCountries = Math.min(8, Math.max(3, Math.ceil(convs.length / 3)));
+  // In batched mode, allow up to maxCountriesTotal for the WHOLE run. Per-batch
+  // cap is permissive so the LLM can introduce new ones early, then reuse later.
+  const maxCountries = batchCtx
+    ? Math.min(batchCtx.maxCountriesTotal, Math.max(3, Math.ceil(convs.length / 3)))
+    : Math.min(8, Math.max(3, Math.ceil(convs.length / 3)));
+
+  // Existing-countries seed for cross-batch reuse. When provided, the LLM is
+  // told to put new conversations into these named countries whenever they fit
+  // a previously-discovered theme, instead of inventing fresh names per batch.
+  const existingCountriesBlock = batchCtx && batchCtx.existingCountries.length > 0
+    ? `
+
+EXISTING COUNTRIES (created by earlier batches — REUSE these names verbatim when conversations match):
+${batchCtx.existingCountries
+        .map((c) => `- "${c.name}": ${c.theme}${c.color ? ` (color ${c.color})` : ""}`)
+        .join("\n")}
+
+Rules for using existing countries:
+- If a conversation in this batch fits any existing country's theme, place it in that country.
+- Reuse the existing country's name VERBATIM (case-sensitive, no rewording).
+- Only create a NEW country for a theme that none of the existing ones cover.
+- Total countries across the whole map should NOT exceed ${batchCtx.maxCountriesTotal}.
+  Currently ${batchCtx.existingCountries.length} exist; prefer reusing them.`
+    : "";
+
+  const batchHeader = batchCtx
+    ? `\n(This is batch ${batchCtx.batchNumber} of ${batchCtx.totalBatches} — covering ${convs.length} conversations of ${batchCtx.globalConvCount} total. Conversations are indexed 0..${convs.length - 1} LOCAL to this batch.)\n`
+    : "";
 
   // Layer 2: optional natural-language exclusion directive. The LLM splits
   // matches into definitive (>=80% confident) vs ambiguous (30-80%) so the
@@ -143,7 +184,7 @@ Apply this directive as follows:
     : "";
 
   const user = `Conversations (${convs.length} total). Each is identified by [N]:
-${convList}
+${convList}${batchHeader}${existingCountriesBlock}
 
 Build a hierarchical map of these conversations.
 
@@ -235,6 +276,195 @@ Output JSON only, this exact shape:
     throw new Error("AI returned no cities.");
   }
   return parsed;
+}
+
+// ── Batched cartography ───────────────────────────────────────────────────────
+//
+// For large maps (1000+ conversations), a single LLM call doesn't fit in
+// context. We batch into ~80-conversation chunks. Each batch sees the
+// COUNTRIES discovered by previous batches as a seed: the LLM is told to
+// reuse those country names whenever a conversation matches their theme,
+// only inventing new names for genuinely-new themes. After all batches
+// complete, we merge by country name (case-insensitive), remap each batch's
+// LOCAL conversationIndex / fromCity / toCity values to GLOBAL indices, and
+// fix up post-merge invariants (≤1 capital per country).
+
+const BATCH_SIZE = 80;
+const SINGLE_CALL_THRESHOLD = 100; // ≤ this many conversations → single LLM call
+const MAX_COUNTRIES_TOTAL = 12;
+
+export async function clusterBatched(
+  inputs: ConvInput[],
+  ai: AiClient,
+  directive: string | null,
+): Promise<AiResult> {
+  // Slice inputs into batches.
+  const batches: ConvInput[][] = [];
+  for (let i = 0; i < inputs.length; i += BATCH_SIZE) {
+    batches.push(inputs.slice(i, i + BATCH_SIZE));
+  }
+
+  // Accumulator. Countries are deduped by lowercased name. The first batch
+  // that introduces a country owns its color/theme/nameJa/neighbors; later
+  // batches only contribute new districts to it.
+  type AccCountry = AiCountry & { districts: AiDistrict[] };
+  const accCountriesByKey = new Map<string, AccCountry>();
+  const insertionOrder: string[] = []; // preserve order countries were first seen
+  const accCities: AiCity[] = [];
+  const accEdges: AiEdge[] = [];
+  const accSkipDefinitive: AiSkipItem[] = [];
+  const accSkipAmbiguous: AiSkipItem[] = [];
+
+  for (let bi = 0; bi < batches.length; bi++) {
+    const batch = batches[bi];
+    const batchOffset = bi * BATCH_SIZE;
+
+    const existingCountries = insertionOrder.map((k) => {
+      const c = accCountriesByKey.get(k)!;
+      return { name: c.name, theme: c.theme, color: c.color };
+    });
+
+    // One bad batch shouldn't kill the whole terraform. Log and continue with
+    // an empty contribution if the LLM hiccups for one batch — the user gets
+    // a slightly thinner map, not a 500.
+    let batchResult: AiResult;
+    try {
+      batchResult = await clusterWithAI(batch, ai, directive, {
+        existingCountries,
+        batchNumber: bi + 1,
+        totalBatches: batches.length,
+        globalConvCount: inputs.length,
+        maxCountriesTotal: MAX_COUNTRIES_TOTAL,
+      });
+    } catch (err) {
+      console.error(
+        `[clusterBatched] batch ${bi + 1}/${batches.length} failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      continue;
+    }
+
+    // Merge countries: dedupe by lowercased trimmed name.
+    for (const c of batchResult.countries ?? []) {
+      const key = (c.name ?? "").toLowerCase().trim();
+      if (!key) continue;
+      let existing = accCountriesByKey.get(key);
+      if (!existing) {
+        existing = {
+          name: c.name,
+          nameJa: c.nameJa,
+          theme: c.theme,
+          color: c.color,
+          neighbors: c.neighbors,
+          districts: [],
+        };
+        accCountriesByKey.set(key, existing);
+        insertionOrder.push(key);
+      }
+      // Append this batch's districts, remapping cityIndexes from local → global.
+      for (const d of c.districts ?? []) {
+        existing.districts.push({
+          name: d.name,
+          nameJa: d.nameJa,
+          cityIndexes: (d.cityIndexes ?? [])
+            .filter((i): i is number => Number.isInteger(i) && i >= 0 && i < batch.length)
+            .map((i) => i + batchOffset),
+        });
+      }
+    }
+
+    // Cities: remap conversationIndex local → global.
+    for (const city of batchResult.cities ?? []) {
+      if (
+        !Number.isInteger(city.conversationIndex) ||
+        city.conversationIndex < 0 ||
+        city.conversationIndex >= batch.length
+      ) continue;
+      accCities.push({
+        ...city,
+        conversationIndex: city.conversationIndex + batchOffset,
+      });
+    }
+
+    // Edges: remap both endpoints.
+    for (const e of batchResult.edges ?? []) {
+      if (
+        !Number.isInteger(e.fromCity) ||
+        !Number.isInteger(e.toCity) ||
+        e.fromCity < 0 || e.fromCity >= batch.length ||
+        e.toCity < 0 || e.toCity >= batch.length
+      ) continue;
+      accEdges.push({
+        ...e,
+        fromCity: e.fromCity + batchOffset,
+        toCity: e.toCity + batchOffset,
+      });
+    }
+
+    // Skip lists.
+    for (const s of batchResult.skipDefinitive ?? []) {
+      if (!Number.isInteger(s.conversationIndex)) continue;
+      if (s.conversationIndex < 0 || s.conversationIndex >= batch.length) continue;
+      accSkipDefinitive.push({
+        conversationIndex: s.conversationIndex + batchOffset,
+        reason: s.reason,
+      });
+    }
+    for (const s of batchResult.skipAmbiguous ?? []) {
+      if (!Number.isInteger(s.conversationIndex)) continue;
+      if (s.conversationIndex < 0 || s.conversationIndex >= batch.length) continue;
+      accSkipAmbiguous.push({
+        conversationIndex: s.conversationIndex + batchOffset,
+        reason: s.reason,
+      });
+    }
+  }
+
+  // Post-merge fix: each country must have at most ONE capital. The LLM picks
+  // a capital per batch independently, so a country present in multiple batches
+  // ends up with multiple. Demote duplicates to "city" — keep the first one
+  // (smallest conversationIndex) as the capital.
+  const convToCountryKey = new Map<number, string>();
+  for (const [key, country] of accCountriesByKey) {
+    for (const d of country.districts) {
+      for (const idx of d.cityIndexes) convToCountryKey.set(idx, key);
+    }
+  }
+  const capitalsAssigned = new Set<string>();
+  // Sort cities by conversationIndex so the "first" capital wins consistently.
+  const cityOrder = [...accCities].sort(
+    (a, b) => a.conversationIndex - b.conversationIndex,
+  );
+  for (const city of cityOrder) {
+    if (city.rank !== "capital") continue;
+    const ck = convToCountryKey.get(city.conversationIndex);
+    if (!ck) continue;
+    if (capitalsAssigned.has(ck)) {
+      city.rank = "city";
+    } else {
+      capitalsAssigned.add(ck);
+    }
+  }
+
+  return {
+    countries: insertionOrder.map((k) => accCountriesByKey.get(k)!),
+    cities: accCities,
+    edges: accEdges,
+    skipDefinitive: accSkipDefinitive.length > 0 ? accSkipDefinitive : undefined,
+    skipAmbiguous: accSkipAmbiguous.length > 0 ? accSkipAmbiguous : undefined,
+  };
+}
+
+// Dispatch: small input → single LLM call (faster, simpler). Large input →
+// batched, accumulating shared country list.
+async function clusterSmart(
+  inputs: ConvInput[],
+  ai: AiClient,
+  directive: string | null,
+): Promise<AiResult> {
+  if (inputs.length <= SINGLE_CALL_THRESHOLD) {
+    return clusterWithAI(inputs, ai, directive);
+  }
+  return clusterBatched(inputs, ai, directive);
 }
 
 // ── Validation & repair ───────────────────────────────────────────────────────
@@ -913,7 +1143,11 @@ async function loadConvInputs(mapId: string): Promise<ConvInput[]> {
       },
     },
     orderBy: { importedAt: "desc" },
-    take: 50,
+    // Cap to keep terraform from running indefinitely on huge backlogs.
+    // Batched cartography (clusterBatched) handles up to a few thousand at
+    // ~$0.30 / 10 minutes for DeepSeek R1; beyond that we'd want a UI for
+    // selecting a subset rather than implicitly truncating.
+    take: 2000,
   });
 
   return allConvs.map((c) => {
@@ -954,7 +1188,7 @@ export async function terraformPreview(
     };
   }
 
-  const aiResult = await clusterWithAI(inputs, ai, directive);
+  const aiResult = await clusterSmart(inputs, ai, directive);
 
   const enrich = (item: AiSkipItem): SkipItem | null => {
     const i = item.conversationIndex;
@@ -1000,9 +1234,10 @@ export async function terraform(
     };
   }
 
-  // Use the cartographer's preview output if provided; otherwise call the LLM.
+  // Use the cartographer's preview output if provided; otherwise call the LLM
+  // (single call for small maps, iterative batched for large ones).
   const aiResult =
-    opts.aiResult ?? (await clusterWithAI(inputs, ai, opts.directive ?? null));
+    opts.aiResult ?? (await clusterSmart(inputs, ai, opts.directive ?? null));
 
   // Persist the directive on this fresh path too, so re-terraform pre-fills it.
   if (opts.directive !== undefined) {
