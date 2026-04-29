@@ -1404,226 +1404,99 @@ export async function terraform(
     countryIdByIdx.set(i, country.id);
   }
 
-  const cityIdByConvIdx = new Map<number, string>();
+  // Phase 2: each LLM "district" becomes a level=city Place — i.e. a CLUSTER
+  // of related conversations rather than a single conversation. Conversations
+  // attach as POIs to their cluster city via PlaceConversation.
+  //
+  // The aiResult.cities[] (per-conv topic / summary / rank) becomes per-POI
+  // metadata: rank stays advisory for label-prominence, but the structural
+  // place hierarchy is country → city.
   let cityOrdinal = 0;
+  // Map from (countryIdx + ":" + districtIdx) → place.id of the city.
+  const cityIdByDistrict = new Map<string, string>();
+  // Track each city's POI conv positions so we can compute its centroid /
+  // built-up radius.
+  const poisByDistrict = new Map<string, Array<{ convIdx: number; pos: [number, number] }>>();
+
   for (const [convIdx, asgn] of assignments) {
-    const countryId = countryIdByIdx.get(asgn.countryIdx);
-    if (!countryId) continue;
     const pos = positions.get(convIdx);
     if (!pos) continue;
+    const key = `${asgn.countryIdx}:${asgn.districtIdx}`;
+    const arr = poisByDistrict.get(key) ?? [];
+    arr.push({ convIdx, pos });
+    poisByDistrict.set(key, arr);
+  }
 
-    const conv = inputs[convIdx];
-    const aiCity = aiResult.cities.find((c) => c.conversationIndex === convIdx);
-    const district = aiResult.countries[asgn.countryIdx]?.districts?.[asgn.districtIdx];
-    const rank = aiCity?.rank ?? "town";
-    const builtUpR = rank === "capital" ? 100 : rank === "city" ? 65 : 30;
+  for (const [key, pois] of poisByDistrict) {
+    const [cIdxStr, dIdxStr] = key.split(":");
+    const countryIdx = Number(cIdxStr);
+    const districtIdx = Number(dIdxStr);
+    const countryId = countryIdByIdx.get(countryIdx);
+    if (!countryId) continue;
+    const district = aiResult.countries[countryIdx]?.districts?.[districtIdx];
+    if (!district) continue;
+
+    // Centroid of POI positions = city anchor.
+    const cx = pois.reduce((s, p) => s + p.pos[0], 0) / pois.length;
+    const cy = pois.reduce((s, p) => s + p.pos[1], 0) / pois.length;
+    // Built-up radius scales with POI count (sqrt so it doesn't explode for
+    // large clusters). Min 30 px so even 1-POI cities have a visible footprint.
+    const builtUpR = Math.max(30, 18 * Math.sqrt(pois.length));
+
+    // Determine the cluster's "capital" POI (LLM-flagged in aiResult.cities,
+    // falling back to the most-substantial conversation by message count).
+    let cityRank: "capital" | "city" | "town" = "town";
+    const capitalConv = pois.find((p) => {
+      const ai = aiResult.cities.find((c) => c.conversationIndex === p.convIdx);
+      return ai?.rank === "capital";
+    });
+    if (capitalConv) cityRank = "capital";
+    else if (pois.length >= 5) cityRank = "city";
 
     const city = await prisma.place.create({
       data: {
         mapId,
         parentId: countryId,
         level: "city",
-        name: aiCity?.topic ?? conv.title ?? "(untitled)",
-        nameJa: aiCity?.topicJa ?? null,
-        // Phase 1 keeps district info as a denormalized field on the city's
-        // theme; Phase 2 will promote District to its own level.
-        theme: district?.name ?? null,
-        cityRank: rank,
-        summary: aiCity?.summary ?? null,
-        positionX: pos[0],
-        positionY: pos[1],
+        name: district.name,
+        nameJa: district.nameJa ?? null,
+        cityRank,
+        positionX: cx,
+        positionY: cy,
         builtUpR,
         ordinal: cityOrdinal++,
-        conversations: { create: { conversationId: conv.id } },
       },
       select: { id: true },
     });
-    cityIdByConvIdx.set(convIdx, city.id);
-  }
+    cityIdByDistrict.set(key, city.id);
 
-  // ── Structured road network (per the user's spec) ──
-  //   1. Highways: MST + α between every country's capital
-  //   2. Main arterials: within each country, capital → each major city (radial)
-  //   3. Collectors: each major city → 1 nearest other major; each town → nearest major
-  //
-  // Roads are stored as straight lines (no waypoints). MST + radial layout has
-  // no loops by construction, no parallel-near-overlap by construction.
-
-  type CityRecord = {
-    convIdx: number;
-    cityId: string;
-    rank: "capital" | "city" | "town";
-    pos: [number, number];
-    countryIdx: number;
-  };
-
-  const allCityRecords: CityRecord[] = [];
-  for (const [convIdx, asgn] of assignments) {
-    const cityId = cityIdByConvIdx.get(convIdx);
-    const pos = positions.get(convIdx);
-    if (!cityId || !pos) continue;
-    const aiCity = aiResult.cities.find((c) => c.conversationIndex === convIdx);
-    allCityRecords.push({
-      convIdx,
-      cityId,
-      rank: aiCity?.rank ?? "town",
-      pos,
-      countryIdx: asgn.countryIdx,
-    });
-  }
-
-  const candidates: RoadCandidate[] = [];
-
-  // Group cities by country for arterials and collectors
-  const recordsByCountry = new Map<number, CityRecord[]>();
-  for (const r of allCityRecords) {
-    if (!recordsByCountry.has(r.countryIdx)) recordsByCountry.set(r.countryIdx, []);
-    recordsByCountry.get(r.countryIdx)!.push(r);
-  }
-
-  // Step 1: highway network — MST + α between capitals (one per country)
-  const capitals: CityRecord[] = [];
-  for (const records of recordsByCountry.values()) {
-    const cap = records.find((r) => r.rank === "capital");
-    if (cap) capitals.push(cap);
-  }
-  if (capitals.length >= 2) {
-    type CapEdge = { i: number; j: number; d: number };
-    const allCapEdges: CapEdge[] = [];
-    for (let i = 0; i < capitals.length; i++) {
-      for (let j = i + 1; j < capitals.length; j++) {
-        allCapEdges.push({ i, j, d: pdist(capitals[i].pos, capitals[j].pos) });
-      }
-    }
-    allCapEdges.sort((a, b) => a.d - b.d);
-
-    // Kruskal's MST
-    const parent = capitals.map((_, i) => i);
-    const find = (x: number): number => {
-      while (parent[x] !== x) {
-        parent[x] = parent[parent[x]];
-        x = parent[x];
-      }
-      return x;
-    };
-    const mstPicks: CapEdge[] = [];
-    const restPicks: CapEdge[] = [];
-    for (const e of allCapEdges) {
-      const ra = find(e.i);
-      const rb = find(e.j);
-      if (ra !== rb) {
-        parent[ra] = rb;
-        mstPicks.push(e);
-      } else {
-        restPicks.push(e);
-      }
-    }
-    // α: 1-2 extra cheapest non-MST edges so the highway graph isn't a strict tree
-    const alpha = Math.min(2, Math.max(0, Math.floor(capitals.length / 3)));
-    const allHighwayEdges = [...mstPicks, ...restPicks.slice(0, alpha)];
-    for (const e of allHighwayEdges) {
-      const a = capitals[e.i];
-      const b = capitals[e.j];
-      candidates.push({
-        fromId: a.cityId,
-        toId: b.cityId,
-        type: "highway",
-        label: "national highway",
-        fromConvIdx: a.convIdx,
-        toConvIdx: b.convIdx,
+    // Attach each POI as a PlaceConversation row + persist its position on
+    // the Conversation itself. Phase 3 will scatter POIs inside the built-up
+    // polygon — for now they keep their force-layout position, which puts
+    // them near the centroid by construction.
+    for (const poi of pois) {
+      const conv = inputs[poi.convIdx];
+      await prisma.conversation.update({
+        where: { id: conv.id },
+        data: { poiX: poi.pos[0], poiY: poi.pos[1] },
+      });
+      await prisma.placeConversation.create({
+        data: { placeId: city.id, conversationId: conv.id },
       });
     }
   }
 
-  // Step 2: within each country, capital → each major city (radial arterials)
-  for (const records of recordsByCountry.values()) {
-    const cap = records.find((r) => r.rank === "capital");
-    if (!cap) continue;
-    for (const r of records) {
-      if (r.rank !== "city") continue;
-      candidates.push({
-        fromId: cap.cityId,
-        toId: r.cityId,
-        type: "regular",
-        label: "main arterial",
-        fromConvIdx: cap.convIdx,
-        toConvIdx: r.convIdx,
-      });
-    }
-  }
-
-  // Step 3: collectors — each major city → 1 nearest major (city or capital);
-  //                       each town → nearest major
-  for (const records of recordsByCountry.values()) {
-    const majors = records.filter((r) => r.rank === "city" || r.rank === "capital");
-    const towns = records.filter((r) => r.rank === "town");
-
-    // City ↔ city (1 nearest non-capital pair; dedupe later collapses repeats)
-    for (const m of majors) {
-      if (m.rank !== "city") continue; // start from cities; pair with nearest other major
-      const others = majors.filter((x) => x.cityId !== m.cityId);
-      if (others.length === 0) continue;
-      others.sort((a, b) => pdist(m.pos, a.pos) - pdist(m.pos, b.pos));
-      const nearest = others[0];
-      candidates.push({
-        fromId: m.cityId,
-        toId: nearest.cityId,
-        type: "trail",
-        label: "collector",
-        fromConvIdx: m.convIdx,
-        toConvIdx: nearest.convIdx,
-      });
-    }
-
-    // Each town → nearest major
-    for (const t of towns) {
-      if (majors.length === 0) continue;
-      let nearest = majors[0];
-      let minD = pdist(t.pos, nearest.pos);
-      for (let i = 1; i < majors.length; i++) {
-        const d = pdist(t.pos, majors[i].pos);
-        if (d < minD) {
-          minD = d;
-          nearest = majors[i];
-        }
-      }
-      candidates.push({
-        fromId: t.cityId,
-        toId: nearest.cityId,
-        type: "trail",
-        label: "local road",
-        fromConvIdx: t.convIdx,
-        toConvIdx: nearest.convIdx,
-      });
-    }
-  }
-
-  // Dedupe identical pairs (e.g. city-A→city-B added from both sides)
-  const finalRoads = dedupePairs(candidates);
-
-  const roadIds: string[] = [];
-  for (const r of finalRoads) {
-    const road = await prisma.road.create({
-      data: {
-        mapId,
-        fromId: r.fromId,
-        toId: r.toId,
-        type: r.type,
-        label: r.label,
-        // No waypoints — straight line from city to city (no intermediate trunks).
-        // The structured network (MST + radial + collectors) doesn't need bundling.
-      },
-      select: { id: true },
-    });
-    roadIds.push(road.id);
-  }
+  // Roads are intentionally NOT generated here — Phase 5 wires them up from
+  // the LLM's semantic edges (city-to-city links the model identified during
+  // cartography). The old structural rules (MST + radial + town-collector)
+  // produced spaghetti at large scale and didn't reflect actual relatedness.
 
   return {
     countriesCreated: countryIdByIdx.size,
-    citiesCreated: cityIdByConvIdx.size,
-    roadsCreated: roadIds.length,
-    roadsCandidates: candidates.length,
-    conversationsPlaced: cityIdByConvIdx.size,
+    citiesCreated: cityIdByDistrict.size,
+    roadsCreated: 0,
+    roadsCandidates: 0,
+    conversationsPlaced: assignments.size,
     conversationsSkipped,
   };
 }
