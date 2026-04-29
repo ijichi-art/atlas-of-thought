@@ -405,6 +405,11 @@ export async function clusterBatched(
       return { name: c.name, theme: c.theme, color: c.color };
     });
 
+    const batchT0 = Date.now();
+    console.log(
+      `[clusterBatched] batch ${bi + 1}/${batches.length} starting (${batch.length} convs, ${existingCountries.length} existing countries)`,
+    );
+
     // One bad batch shouldn't kill the whole terraform. Log and continue with
     // an empty contribution if the LLM hiccups for one batch — the user gets
     // a slightly thinner map, not a 500.
@@ -419,10 +424,13 @@ export async function clusterBatched(
       });
     } catch (err) {
       console.error(
-        `[clusterBatched] batch ${bi + 1}/${batches.length} failed: ${err instanceof Error ? err.message : String(err)}`,
+        `[clusterBatched] batch ${bi + 1}/${batches.length} failed after ${((Date.now() - batchT0) / 1000).toFixed(1)}s: ${err instanceof Error ? err.message : String(err)}`,
       );
       continue;
     }
+    console.log(
+      `[clusterBatched] batch ${bi + 1}/${batches.length} done in ${((Date.now() - batchT0) / 1000).toFixed(1)}s — countries=${batchResult.countries?.length ?? 0} cities=${batchResult.cities?.length ?? 0} edges=${batchResult.edges?.length ?? 0}`,
+    );
 
     // Merge countries: dedupe by lowercased trimmed name.
     for (const c of batchResult.countries ?? []) {
@@ -525,6 +533,10 @@ export async function clusterBatched(
       capitalsAssigned.add(ck);
     }
   }
+
+  console.log(
+    `[clusterBatched] DONE — accumulated countries=${accCountriesByKey.size} cities=${accCities.length} edges=${accEdges.length} (${batches.length} batches over ${inputs.length} convs)`,
+  );
 
   return {
     countries: insertionOrder.map((k) => accCountriesByKey.get(k)!),
@@ -1343,14 +1355,19 @@ export async function terraform(
   const { positions, countryCenters } = layoutAll(aiResult, assignments, seedParts);
   void countryCenters; // not stored on Country yet — used internally for layout
 
-  // Wipe existing geography
+  // Wipe existing geography. Roads first (FK to Place), then Places, then
+  // we'll let cascades clean PlaceConversation rows.
   await prisma.$transaction([
     prisma.road.deleteMany({ where: { mapId } }),
-    prisma.city.deleteMany({ where: { mapId } }),
-    prisma.country.deleteMany({ where: { mapId } }),
+    prisma.place.deleteMany({ where: { mapId } }),
   ]);
 
-  // Create countries with city-derived organic polygons
+  // Phase 1 keeps the existing "1 conv = 1 city" model — we just persist
+  // every level=country and level=city node as a Place row. Phase 2 will
+  // add the real cluster-with-POIs hierarchy (multiple convs per city).
+  // Schema-wise the new Place table can already represent that; this layer
+  // is intentionally still flat to keep the diff focused.
+
   const countryIdByIdx = new Map<number, string>();
   for (let i = 0; i < aiResult.countries.length; i++) {
     const c = aiResult.countries[i];
@@ -1366,22 +1383,29 @@ export async function terraform(
       cityPositions,
       deterministicSeed([c.name + ":" + i]),
     );
-    const country = await prisma.country.create({
+    // Country anchor = centroid of its city positions.
+    const cx = cityPositions.reduce((s, p) => s + p[0], 0) / cityPositions.length;
+    const cy = cityPositions.reduce((s, p) => s + p[1], 0) / cityPositions.length;
+    const country = await prisma.place.create({
       data: {
         mapId,
+        level: "country",
         name: c.name,
         nameJa: c.nameJa ?? null,
         theme: c.theme ?? null,
         color: c.color || COUNTRY_COLORS[i % COUNTRY_COLORS.length],
         polygon,
+        positionX: cx,
+        positionY: cy,
+        ordinal: i,
       },
       select: { id: true },
     });
     countryIdByIdx.set(i, country.id);
   }
 
-  // Create cities (one per assigned conversation)
   const cityIdByConvIdx = new Map<number, string>();
+  let cityOrdinal = 0;
   for (const [convIdx, asgn] of assignments) {
     const countryId = countryIdByIdx.get(asgn.countryIdx);
     if (!countryId) continue;
@@ -1392,20 +1416,24 @@ export async function terraform(
     const aiCity = aiResult.cities.find((c) => c.conversationIndex === convIdx);
     const district = aiResult.countries[asgn.countryIdx]?.districts?.[asgn.districtIdx];
     const rank = aiCity?.rank ?? "town";
+    const builtUpR = rank === "capital" ? 100 : rank === "city" ? 65 : 30;
 
-    const city = await prisma.city.create({
+    const city = await prisma.place.create({
       data: {
         mapId,
-        countryId,
-        rank,
-        label: aiCity?.topic ?? conv.title ?? "(untitled)",
-        labelJa: aiCity?.topicJa ?? null,
-        district: district?.name ?? null,
-        districtJa: district?.nameJa ?? null,
+        parentId: countryId,
+        level: "city",
+        name: aiCity?.topic ?? conv.title ?? "(untitled)",
+        nameJa: aiCity?.topicJa ?? null,
+        // Phase 1 keeps district info as a denormalized field on the city's
+        // theme; Phase 2 will promote District to its own level.
+        theme: district?.name ?? null,
+        cityRank: rank,
         summary: aiCity?.summary ?? null,
         positionX: pos[0],
         positionY: pos[1],
-        urbanDensity: rank === "capital" ? 8 : rank === "city" ? 5 : 2,
+        builtUpR,
+        ordinal: cityOrdinal++,
         conversations: { create: { conversationId: conv.id } },
       },
       select: { id: true },

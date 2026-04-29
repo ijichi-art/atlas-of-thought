@@ -8,11 +8,27 @@ export default async function Home() {
 
   let maps: { id: string; title: string; _count: { conversations: number; cities: number } }[] = [];
   if (session?.user?.id) {
-    maps = await prisma.map.findMany({
+    const rawMaps = await prisma.map.findMany({
       where: { userId: session.user.id },
-      select: { id: true, title: true, _count: { select: { conversations: true, cities: true } } },
+      select: { id: true, title: true, _count: { select: { conversations: true } } },
       orderBy: { updatedAt: "desc" },
     });
+    // Per-map count of city-level Places. _count can't filter by a column,
+    // so do one extra group-by aggregate.
+    const cityCounts = await prisma.place.groupBy({
+      by: ["mapId"],
+      where: { mapId: { in: rawMaps.map((m) => m.id) }, level: "city" },
+      _count: { _all: true },
+    });
+    const cityCountByMap = new Map(cityCounts.map((g) => [g.mapId, g._count._all]));
+    maps = rawMaps.map((m) => ({
+      id: m.id,
+      title: m.title,
+      _count: {
+        conversations: m._count.conversations,
+        cities: cityCountByMap.get(m.id) ?? 0,
+      },
+    }));
   }
 
   return (

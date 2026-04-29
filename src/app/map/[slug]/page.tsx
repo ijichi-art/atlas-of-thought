@@ -10,30 +10,52 @@ type Props = { params: Promise<{ slug: string }> };
 async function loadMap(slug: string) {
   const map = await prisma.map.findFirst({
     where: { shareSlug: slug, visibility: { not: "private" } },
+    select: { id: true, title: true, shareSlug: true },
+  });
+  if (!map) return null;
+  const mapId = map.id;
+
+  const places = await prisma.place.findMany({
+    where: { mapId },
+    orderBy: { ordinal: "asc" },
+  });
+  const countryPlaces = places.filter((p) => p.level === "country");
+  const cityPlaces = places.filter((p) => p.level === "city");
+
+  const cityConvs = await prisma.placeConversation.findMany({
+    where: { place: { mapId, level: "city" } },
     include: {
-      countries: true,
-      cities: {
+      conversation: {
         include: {
-          conversations: {
-            include: {
-              conversation: {
-                include: {
-                  messages: {
-                    orderBy: { ordinal: "asc" },
-                    take: 6,
-                    select: { role: true, text: true },
-                  },
-                },
-              },
-            },
+          messages: {
+            orderBy: { ordinal: "asc" },
+            take: 6,
+            select: { role: true, text: true },
           },
         },
       },
-      roads: true,
-      _count: { select: { cities: true, countries: true } },
     },
   });
-  return map;
+  const messagesByCity = new Map<string, { role: string; text: string }[]>();
+  for (const cc of cityConvs) {
+    const arr = messagesByCity.get(cc.placeId) ?? [];
+    for (const m of cc.conversation.messages) arr.push({ role: m.role, text: m.text });
+    messagesByCity.set(cc.placeId, arr);
+  }
+
+  const dbRoads = await prisma.road.findMany({ where: { mapId } });
+
+  return {
+    id: map.id,
+    title: map.title,
+    shareSlug: map.shareSlug,
+    countryPlaces,
+    cityPlaces,
+    messagesByCity,
+    dbRoads,
+    cityCount: cityPlaces.length,
+    countryCount: countryPlaces.length,
+  };
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
@@ -41,7 +63,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const map = await loadMap(slug);
   if (!map) return { title: "Map not found" };
 
-  const desc = `${map._count.cities} cities across ${map._count.countries} countries — an Atlas of Thought`;
+  const desc = `${map.cityCount} cities across ${map.countryCount} countries — an Atlas of Thought`;
   const origin = process.env.NEXT_PUBLIC_ORIGIN ?? "http://localhost:3002";
 
   return {
@@ -67,7 +89,7 @@ export default async function PublicMapPage({ params }: Props) {
   const map = await loadMap(slug);
   if (!map) notFound();
 
-  const countries: CountryData[] = map.countries.map((c) => ({
+  const countries: CountryData[] = map.countryPlaces.map((c) => ({
     id: c.id,
     name: c.name,
     nameJa: c.nameJa ?? undefined,
@@ -76,24 +98,24 @@ export default async function PublicMapPage({ params }: Props) {
     polygon: (c.polygon as [number, number][]) ?? [],
   }));
 
-  const cities: CityData[] = map.cities.map((c) => {
-    const messages = c.conversations
-      .flatMap((cc) => cc.conversation.messages.map((m) => ({ role: m.role as "user" | "assistant", text: m.text })))
+  const cities: CityData[] = map.cityPlaces.map((c) => {
+    const messages = (map.messagesByCity.get(c.id) ?? [])
+      .map((m) => ({ role: m.role as "user" | "assistant", text: m.text }))
       .slice(0, 6);
     return {
       id: c.id,
-      countryId: c.countryId,
-      rank: c.rank as CityData["rank"],
-      label: c.label,
-      labelJa: c.labelJa ?? undefined,
+      countryId: c.parentId ?? "",
+      rank: (c.cityRank ?? "town") as CityData["rank"],
+      label: c.name,
+      labelJa: c.nameJa ?? undefined,
       position: [c.positionX, c.positionY] as Point,
-      urbanDensity: c.urbanDensity,
+      urbanDensity: c.cityRank === "capital" ? 8 : c.cityRank === "city" ? 5 : 2,
       summary: c.summary ?? undefined,
       messages: messages.length > 0 ? messages : undefined,
     };
   });
 
-  const roads: RoadData[] = map.roads.map((r) => ({
+  const roads: RoadData[] = map.dbRoads.map((r) => ({
     id: r.id,
     fromCityId: r.fromId,
     toCityId: r.toId,
@@ -124,7 +146,7 @@ export default async function PublicMapPage({ params }: Props) {
           <span className="text-stone-700">{map.title}</span>
         </div>
         <div className="flex items-center gap-3 text-xs text-stone-400">
-          <span>{map._count.cities} cities · {map._count.countries} countries</span>
+          <span>{map.cityCount} cities · {map.countryCount} countries</span>
           <Link href={`/map/${slug}/embed`} className="underline hover:text-stone-600">
             embed
           </Link>

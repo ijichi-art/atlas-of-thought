@@ -10,15 +10,14 @@ export default async function OgImage({ params }: { params: Promise<{ slug: stri
 
   const map = await prisma.map.findFirst({
     where: { shareSlug: slug, visibility: { not: "private" } },
-    select: {
-      title: true,
-      _count: { select: { cities: true, countries: true } },
-    },
+    select: { id: true, title: true },
   });
 
   const title = map?.title ?? "Atlas of Thought";
-  const cities = map?._count.cities ?? 0;
-  const countries = map?._count.countries ?? 0;
+  // Counts come from a separate query because _count doesn't accept a where
+  // filter on a single relation.
+  const cities = map ? await prisma.place.count({ where: { mapId: map.id, level: "city" } }) : 0;
+  const countries = map ? await prisma.place.count({ where: { mapId: map.id, level: "country" } }) : 0;
 
   return new ImageResponse(
     (

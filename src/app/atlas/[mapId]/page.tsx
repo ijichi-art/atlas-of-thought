@@ -19,10 +19,15 @@ export default async function UserAtlasPage({ params }: { params: Promise<{ mapI
       id: true,
       title: true,
       exclusionDirective: true,
-      _count: { select: { conversations: true, cities: true } },
+      _count: { select: { conversations: true } },
     },
   });
   if (!map) redirect("/");
+
+  // Count city-level Places separately — _count doesn't accept a where filter.
+  const cityCount = await prisma.place.count({
+    where: { mapId, level: "city" },
+  });
 
   return (
     <div className="h-screen flex flex-col">
@@ -33,7 +38,7 @@ export default async function UserAtlasPage({ params }: { params: Promise<{ mapI
           </Link>
           <MapTitle mapId={map.id} initial={map.title} />
           <span className="text-stone-400 text-xs">
-            {map._count.conversations} conversations · {map._count.cities} cities
+            {map._count.conversations} conversations · {cityCount} cities
           </span>
         </div>
         <div className="flex items-center gap-2">
@@ -41,13 +46,13 @@ export default async function UserAtlasPage({ params }: { params: Promise<{ mapI
           <TerraformPanel
             mapId={map.id}
             conversationCount={map._count.conversations}
-            cityCount={map._count.cities}
+            cityCount={cityCount}
             initialDirective={map.exclusionDirective ?? ""}
           />
         </div>
       </header>
       <div className="flex-1 min-h-0">
-        <AtlasView mapId={map.id} cityCount={map._count.cities} />
+        <AtlasView mapId={map.id} cityCount={cityCount} />
       </div>
     </div>
   );

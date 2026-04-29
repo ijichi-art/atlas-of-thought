@@ -14,32 +14,45 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
   const map = await prisma.map.findFirst({
     where: { id: mapId, userId },
+    select: { id: true, title: true },
+  });
+  if (!map) return NextResponse.json({ error: "Map not found" }, { status: 404 });
+
+  // Materialise the legacy { countries, cities, roads } shape from Place
+  // rows. Phase 1 keeps the schema flat (level=country at depth 1, level=city
+  // at depth 2). Phase 4 will return a richer hierarchy + POI list directly.
+  const places = await prisma.place.findMany({
+    where: { mapId },
+    orderBy: { ordinal: "asc" },
+  });
+  const cityPlaces = places.filter((p) => p.level === "city");
+  const countryPlaces = places.filter((p) => p.level === "country");
+
+  // Pull conversation message previews for each city (POI side panel data).
+  const cityConvs = await prisma.placeConversation.findMany({
+    where: { place: { mapId, level: "city" } },
     include: {
-      countries: true,
-      cities: {
+      conversation: {
         include: {
-          conversations: {
-            include: {
-              conversation: {
-                include: {
-                  messages: {
-                    orderBy: { ordinal: "asc" },
-                    take: 6,
-                    select: { role: true, text: true },
-                  },
-                },
-              },
-            },
+          messages: {
+            orderBy: { ordinal: "asc" },
+            take: 6,
+            select: { role: true, text: true },
           },
         },
       },
-      roads: true,
     },
   });
+  const messagesByCity = new Map<string, { role: "user" | "assistant"; text: string }[]>();
+  for (const cc of cityConvs) {
+    const arr = messagesByCity.get(cc.placeId) ?? [];
+    for (const m of cc.conversation.messages) {
+      arr.push({ role: m.role as "user" | "assistant", text: m.text });
+    }
+    messagesByCity.set(cc.placeId, arr);
+  }
 
-  if (!map) return NextResponse.json({ error: "Map not found" }, { status: 404 });
-
-  const countries: CountryData[] = map.countries.map((c) => ({
+  const countries: CountryData[] = countryPlaces.map((c) => ({
     id: c.id,
     name: c.name,
     nameJa: c.nameJa ?? undefined,
@@ -48,31 +61,25 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     polygon: (c.polygon as [number, number][]) ?? [],
   }));
 
-  const cities: CityData[] = map.cities.map((c) => {
-    // Collect messages from all linked conversations for the panel preview.
-    const messages = c.conversations.flatMap((cc) =>
-      cc.conversation.messages.map((m) => ({
-        role: m.role as "user" | "assistant",
-        text: m.text,
-      }))
-    ).slice(0, 6);
-
+  const cities: CityData[] = cityPlaces.map((c) => {
+    const messages = (messagesByCity.get(c.id) ?? []).slice(0, 6);
     return {
       id: c.id,
-      countryId: c.countryId,
-      rank: c.rank as CityData["rank"],
-      label: c.label,
-      labelJa: c.labelJa ?? undefined,
-      district: c.district ?? undefined,
-      districtJa: c.districtJa ?? undefined,
+      countryId: c.parentId ?? "",
+      rank: (c.cityRank ?? "town") as CityData["rank"],
+      label: c.name,
+      labelJa: c.nameJa ?? undefined,
+      district: c.theme ?? undefined,
+      districtJa: undefined,
       position: [c.positionX, c.positionY] as Point,
-      urbanDensity: c.urbanDensity,
+      urbanDensity: c.cityRank === "capital" ? 8 : c.cityRank === "city" ? 5 : 2,
       summary: c.summary ?? undefined,
       messages: messages.length > 0 ? messages : undefined,
     };
   });
 
-  const roads: RoadData[] = map.roads.map((r) => ({
+  const dbRoads = await prisma.road.findMany({ where: { mapId } });
+  const roads: RoadData[] = dbRoads.map((r) => ({
     id: r.id,
     fromCityId: r.fromId,
     toCityId: r.toId,

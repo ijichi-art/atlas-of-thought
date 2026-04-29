@@ -116,6 +116,18 @@ enum CityRank {
   town
 }
 
+// Place is a recursive geographic node: Region > Country > District > City > Block.
+// The leaf (usually City, sometimes Block) holds POIs (individual conversations).
+// Depth is determined by terraform from the conversation count — small maps may
+// only use Country, large ones go all the way to Block.
+enum PlaceLevel {
+  region
+  country
+  district
+  city
+  block
+}
+
 enum RoadType {
   highway
   regular
@@ -167,52 +179,59 @@ model Map {
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt
 
-  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  countries Country[]
-  cities    City[]
-  roads     Road[]
-  terrain   TerrainFeature[]
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  places        Place[]
+  roads         Road[]
+  terrain       TerrainFeature[]
   conversations Conversation[]
 }
 
-model Country {
-  id        String   @id @default(cuid())
+// Hierarchical geographic node. Each map has a forest of Places rooted at
+// level=country (or level=region for huge maps). Children belong to their
+// parent's polygon. Conversations are attached as POIs to the LEAF Place
+// they belong to (typically a city, sometimes a block).
+model Place {
+  id        String     @id @default(cuid())
   mapId     String
-  name      String   // Latin-style
+  parentId  String?
+  level     PlaceLevel
+  name      String
   nameJa    String?
   theme     String?
-  color     String   @default("#c9b88a")
-  // Polygon stored as JSON array of [x, y] pairs
+  // Hex color (countries are themed, lower levels inherit / override).
+  color     String     @default("#c9b88a")
+  // For drawn boundaries (region/country/district/city). Block doesn't
+  // need a polygon — it's rendered as a chunk of the parent city's grid.
   polygon   Json?
-  createdAt DateTime @default(now())
+  // Anchor point used for force layout, label, and built-up centroid.
+  positionX Float
+  positionY Float
+  // Per-level rank (0 = capital/primary). For city level, drives built-up
+  // radius and label prominence.
+  rank      Int        @default(0)
+  // Stable creation order within siblings (terraform fills this so the same
+  // input produces the same map without depending on cuid order).
+  ordinal   Int        @default(0)
+  // City-only: built-up polygon radius in user-units (drives POI scatter
+  // and the in-city street grid).
+  builtUpR  Float?
+  // City-only: legacy CityRank for label/pin styling continuity.
+  cityRank  CityRank?
+  // City-only: short narrative summary surfaced in the side panel.
+  summary   String?    @db.Text
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
 
-  map    Map    @relation(fields: [mapId], references: [id], onDelete: Cascade)
-  cities City[]
-}
-
-model City {
-  id            String     @id @default(cuid())
-  mapId         String
-  countryId     String
-  rank          CityRank   @default(town)
-  label         String
-  labelJa       String?
-  district      String?    // sub-cluster label within country (e.g. "Auth Quarter")
-  districtJa    String?
-  summary       String?    @db.Text
-  positionX     Float
-  positionY     Float
-  urbanDensity  Int        @default(1)
-  visibility    Visibility @default(private)
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
-
-  map           Map               @relation(fields: [mapId], references: [id], onDelete: Cascade)
-  country       Country           @relation(fields: [countryId], references: [id], onDelete: Cascade)
-  conversations CityConversation[]
+  map           Map                 @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  parent        Place?              @relation("PlaceHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children      Place[]             @relation("PlaceHierarchy")
+  conversations PlaceConversation[]
   artifacts     Artifact[]
-  roadsFrom     Road[]            @relation("RoadFrom")
-  roadsTo       Road[]            @relation("RoadTo")
+  roadsFrom     Road[]              @relation("RoadFrom")
+  roadsTo       Road[]              @relation("RoadTo")
+
+  @@index([mapId, level])
+  @@index([parentId])
 }
 
 model Conversation {
@@ -224,31 +243,33 @@ model Conversation {
   topicEmbedding  Bytes?      // pgvector via raw SQL until pgvector-prisma in Phase 4
   createdAtSource DateTime?
   importedAt      DateTime    @default(now())
+  // POI position inside the leaf Place's built-up polygon (absolute map
+  // coords). Set by terraform when the conversation is attached. Null until
+  // the conversation has been placed.
+  poiX            Float?
+  poiY            Float?
 
-  map      Map                @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  map      Map                 @relation(fields: [mapId], references: [id], onDelete: Cascade)
   messages Message[]
-  cities   CityConversation[]
+  places   PlaceConversation[]
 
   @@unique([mapId, source, externalId])
 }
 
-// N:N City <-> Conversation. From day 1, so Phase 4 topic-splitting doesn't
-// require a schema change. In Phase 2 we'll insert exactly one row per
-// conversation; in Phase 4 we may split a conversation across multiple cities.
-model CityConversation {
-  cityId         String
+// N:N Place <-> Conversation. A conversation is normally attached to one
+// leaf Place, but the table supports topic-segment splitting (segmentStart/
+// segmentEnd) for the future Phase 4 feature.
+model PlaceConversation {
+  placeId        String
   conversationId String
-  // Message-range slice. In Phase 2, segmentStart=0 and segmentEnd=-1 mean
-  // "the entire conversation belongs to this city". In Phase 4 we split a
-  // conversation across multiple cities by topic segment.
   segmentStart   Int      @default(0)
   segmentEnd     Int      @default(-1)
   createdAt      DateTime @default(now())
 
-  city         City         @relation(fields: [cityId], references: [id], onDelete: Cascade)
+  place        Place        @relation(fields: [placeId], references: [id], onDelete: Cascade)
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
-  @@id([cityId, conversationId, segmentStart, segmentEnd])
+  @@id([placeId, conversationId, segmentStart, segmentEnd])
 }
 
 model Message {
@@ -276,15 +297,17 @@ model Road {
   type      RoadType @default(regular)
   label     String?
   rationale String?  @db.Text
-  // Optional intermediate waypoints (district + country centroids) so multiple
-  // roads passing through the same hierarchy levels share visual segments.
-  // Stored as JSON array of [x, y] pairs.
+  // Conceptual link strength from the LLM (0..1). Drives bundling weight
+  // and may inform render width in future iterations.
+  weight    Float    @default(1)
+  // Optional intermediate waypoints (cluster centroids, etc.) so multiple
+  // roads sharing a trunk segment render bit-identically.
   waypoints Json?
   createdAt DateTime @default(now())
 
-  map  Map  @relation(fields: [mapId], references: [id], onDelete: Cascade)
-  from City @relation("RoadFrom", fields: [fromId], references: [id], onDelete: Cascade)
-  to   City @relation("RoadTo",   fields: [toId],   references: [id], onDelete: Cascade)
+  map  Map   @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  from Place @relation("RoadFrom", fields: [fromId], references: [id], onDelete: Cascade)
+  to   Place @relation("RoadTo",   fields: [toId],   references: [id], onDelete: Cascade)
 
   @@index([mapId])
 }
@@ -304,12 +327,13 @@ model TerrainFeature {
 
 model Artifact {
   id            String       @id @default(cuid())
-  cityId        String
+  // The Place this artifact belongs to (typically a city-level Place).
+  placeId       String
   kind          ArtifactKind
   landmarkType  LandmarkType
   title         String
   content       String       @db.Text
   createdAt     DateTime     @default(now())
 
-  city City @relation(fields: [cityId], references: [id], onDelete: Cascade)
+  place Place @relation(fields: [placeId], references: [id], onDelete: Cascade)
 }
