@@ -62,13 +62,39 @@ export function TerraformPanel({
   };
 
   // Run preview: cartographer LLM with the directive, returns skip lists.
+  // Fast-path: when the directive is empty there is nothing to confirm, so
+  // we skip the preview round-trip and call /terraform directly. This both
+  // halves the wall-clock time (one LLM run instead of two) and means the
+  // result is persisted in the same server call that produced it — if the
+  // dev server crashes after the response, the geography is already in the
+  // DB rather than living transiently in browser memory waiting for an
+  // explicit "approve" click.
   const analyze = async () => {
     setPhase("analyzing");
     setError("");
+
+    if (!directive.trim()) {
+      const res = await fetch(`/api/maps/${mapId}/terraform`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ directive: null }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.message ?? data.error ?? "Terraform failed");
+        setPhase("error");
+        return;
+      }
+      setResult(data as CommitResult);
+      setPhase("done");
+      router.refresh();
+      return;
+    }
+
     const res = await fetch(`/api/maps/${mapId}/terraform/preview`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ directive: directive.trim() || null }),
+      body: JSON.stringify({ directive: directive.trim() }),
     });
     const data = await res.json();
     if (!res.ok) {
@@ -78,7 +104,6 @@ export function TerraformPanel({
     }
     const p = data as PreviewResult;
     setPreview(p);
-    // Default ambiguous items to NOT skip — user must opt in to cutting.
     const defaults: Record<number, boolean> = {};
     for (const item of p.skipAmbiguous) defaults[item.convIdx] = false;
     setAmbiguousChoices(defaults);
