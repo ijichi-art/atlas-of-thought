@@ -12,6 +12,7 @@ import { Road } from "./Road";
 import { Legend } from "./Legend";
 import { CityDetailPanel } from "./CityDetailPanel";
 import { Districts } from "./Districts";
+import { POILayer } from "./POILayer";
 import { ATLAS_STYLE } from "@/lib/atlas-style";
 import { bundleSharedTrunks } from "@/lib/bundle-trunks";
 
@@ -24,6 +25,8 @@ export function Atlas({ map }: { map: SampleMap }) {
   const zoomRef = useRef<ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const [scale, setScale] = useState(1);
   const [selectedCityId, setSelectedCityId] = useState<string | null>(null);
+  const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
+  const pois = useMemo(() => map.pois ?? [], [map.pois]);
   const cityById = useMemo(() => new Map(map.cities.map((c) => [c.id, c])), [map.cities]);
   const countryById = useMemo(
     () => new Map(map.countries.map((c) => [c.id, c])),
@@ -84,7 +87,10 @@ export function Atlas({ map }: { map: SampleMap }) {
         viewBox={`0 0 ${width} ${height}`}
         preserveAspectRatio="xMidYMid meet"
         className="w-full h-full cursor-grab active:cursor-grabbing block"
-        onClick={() => setSelectedCityId(null)}
+        onClick={() => {
+          setSelectedCityId(null);
+          setSelectedConvId(null);
+        }}
       >
         <AtlasDefs />
         <g ref={contentRef}>
@@ -113,6 +119,17 @@ export function Atlas({ map }: { map: SampleMap }) {
               scale={scale}
             />
           ))}
+          <POILayer
+            pois={pois}
+            scale={scale}
+            selectedId={selectedConvId}
+            onSelect={(convId) => {
+              setSelectedConvId(convId);
+              // Auto-select the parent city too so the side panel knows context.
+              const poi = pois.find((p) => p.conversationId === convId);
+              if (poi) setSelectedCityId(poi.cityId);
+            }}
+          />
           <Districts cities={map.cities} scale={scale} />
         </g>
       </svg>

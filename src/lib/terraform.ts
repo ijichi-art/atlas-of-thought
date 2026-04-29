@@ -1470,15 +1470,28 @@ export async function terraform(
     });
     cityIdByDistrict.set(key, city.id);
 
-    // Attach each POI as a PlaceConversation row + persist its position on
-    // the Conversation itself. Phase 3 will scatter POIs inside the built-up
-    // polygon — for now they keep their force-layout position, which puts
-    // them near the centroid by construction.
+    // Phase 3: scatter POIs uniformly inside the city's built-up disk
+    // (radius = builtUpR * 0.85 so they stay clear of the city outline).
+    // Force-layout positions are noisy at the cluster level — a single
+    // big force-layouted conv could be placed far from the centroid we
+    // just computed. Re-scattering here gives an even, predictable
+    // distribution and keeps every POI inside its parent's polygon.
+    let rng = (deterministicSeed([city.id, "pois"]) ^ 0x9e3779b9) >>> 0;
+    const next = (): number => {
+      rng = (Math.imul(rng, 1664525) + 1013904223) >>> 0;
+      return rng / 0xffffffff;
+    };
     for (const poi of pois) {
       const conv = inputs[poi.convIdx];
+      // sqrt for uniform area distribution in a disk; 0.05 inner padding
+      // so POIs aren't all stacked at the centroid for very small clusters.
+      const r = (Math.sqrt(0.05 + 0.95 * next())) * builtUpR * 0.85;
+      const ang = next() * Math.PI * 2;
+      const px = cx + Math.cos(ang) * r;
+      const py = cy + Math.sin(ang) * r;
       await prisma.conversation.update({
         where: { id: conv.id },
-        data: { poiX: poi.pos[0], poiY: poi.pos[1] },
+        data: { poiX: px, poiY: py },
       });
       await prisma.placeConversation.create({
         data: { placeId: city.id, conversationId: conv.id },

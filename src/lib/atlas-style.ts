@@ -210,6 +210,25 @@ export const ATLAS_STYLE = {
     minScale: 1.5, // hidden until the user zooms past street level
   },
 
+  // ── POIs (individual conversations inside a cluster city) ────────────────
+  poi: {
+    minScale: 1.4, // dots visible at city-zoom
+    labelMinScale: 2.2, // labels only at street-zoom (or there'd be clutter)
+    outerR: 3,
+    fill: "#d65a4a", // --landmark-poi
+    stroke: "#ffffff",
+    strokeWidth: 1.0,
+    selectionPad: 4,
+    selectionHaloColor: "#1976d2",
+    selectionHaloOpacity: 0.22,
+    fontSize: 9,
+    fontWeight: 500,
+    color: "#2c2c2c",
+    haloColor: "#ffffff",
+    haloWidth: 3,
+    labelDy: 9,
+  },
+
   // ── Road labels (textPath along the road) ─────────────────────────────────
   // Only highway/arterial roads get a name label, and only at detail zoom.
   roadLabel: {

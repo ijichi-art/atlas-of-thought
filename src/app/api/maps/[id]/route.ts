@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import type { SampleMap, CityData, CountryData, RoadData, Point } from "@/types/atlas";
+import type { SampleMap, CityData, CountryData, RoadData, POIData, Point } from "@/types/atlas";
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
@@ -72,11 +72,39 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       district: c.theme ?? undefined,
       districtJa: undefined,
       position: [c.positionX, c.positionY] as Point,
+      builtUpR: c.builtUpR ?? undefined,
       urbanDensity: c.cityRank === "capital" ? 8 : c.cityRank === "city" ? 5 : 2,
       summary: c.summary ?? undefined,
       messages: messages.length > 0 ? messages : undefined,
     };
   });
+
+  // POIs (individual conversations) — one per Conversation that has a place
+  // assigned, with the position scattered inside its city's built-up disk
+  // by Phase 3.
+  const poiRows = await prisma.conversation.findMany({
+    where: { mapId, places: { some: { place: { mapId, level: "city" } } }, poiX: { not: null } },
+    select: {
+      id: true,
+      title: true,
+      poiX: true,
+      poiY: true,
+      places: {
+        where: { place: { level: "city" } },
+        select: { placeId: true },
+        take: 1,
+      },
+    },
+  });
+  const pois: POIData[] = poiRows
+    .filter((p) => p.places[0] && p.poiX !== null && p.poiY !== null)
+    .map((p) => ({
+      id: `poi-${p.id}`,
+      cityId: p.places[0].placeId,
+      conversationId: p.id,
+      label: p.title ?? "(untitled)",
+      position: [p.poiX!, p.poiY!] as Point,
+    }));
 
   const dbRoads = await prisma.road.findMany({ where: { mapId } });
   const roads: RoadData[] = dbRoads.map((r) => ({
@@ -98,6 +126,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     rivers: [],
     cities,
     roads,
+    pois,
   };
 
   return NextResponse.json(sampleMap);

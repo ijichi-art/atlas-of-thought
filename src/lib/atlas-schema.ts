@@ -49,7 +49,10 @@ const City = z.object({
   rank: z.enum(["capital", "city", "town"]),
   label: z.string(),
   labelJa: z.string().optional(),
+  district: z.string().optional(),
+  districtJa: z.string().optional(),
   position: Point,
+  builtUpR: z.number().optional(),
   urbanDensity: z.number().min(0).max(10),
   summary: z.string().optional(),
   messages: z.array(MockMessage).optional(),
@@ -64,6 +67,15 @@ const Road = z.object({
   waypoints: z.array(Point).optional(),
 });
 
+const POI = z.object({
+  id: z.string(),
+  cityId: z.string(),
+  conversationId: z.string(),
+  label: z.string(),
+  labelJa: z.string().optional(),
+  position: Point,
+});
+
 export const SampleMapSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -74,6 +86,7 @@ export const SampleMapSchema = z.object({
   rivers: z.array(River),
   cities: z.array(City),
   roads: z.array(Road),
+  pois: z.array(POI).optional(),
 });
 
 // Compile-time assertion: the inferred shape matches our hand-written types.

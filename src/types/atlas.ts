@@ -62,6 +62,8 @@ export type CityData = {
   district?: string;
   districtJa?: string;
   position: Point;
+  // Built-up radius in user-units (computed from POI count for cluster cities).
+  builtUpR?: number;
   // 0 = no buildings, 10 = dense cluster
   urbanDensity: number;
   // Optional one-paragraph summary of what this city represents.
@@ -69,6 +71,17 @@ export type CityData = {
   // Optional mock conversation preview shown in the detail panel.
   // In Phase 4 this will come from imported data; for the demo we hard-code.
   messages?: MockMessage[];
+};
+
+// One POI = one underlying conversation, scattered as a pin inside its
+// parent city's built-up area. Visible only at street-level zoom.
+export type POIData = {
+  id: string;
+  cityId: string;
+  conversationId: string;
+  label: string;
+  labelJa?: string;
+  position: Point;
 };
 
 export type SampleMap = {
@@ -81,4 +94,5 @@ export type SampleMap = {
   rivers: RiverData[];
   cities: CityData[];
   roads: RoadData[];
+  pois?: POIData[];
 };
