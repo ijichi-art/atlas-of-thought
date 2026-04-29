@@ -1486,16 +1486,78 @@ export async function terraform(
     }
   }
 
-  // Roads are intentionally NOT generated here — Phase 5 wires them up from
-  // the LLM's semantic edges (city-to-city links the model identified during
-  // cartography). The old structural rules (MST + radial + town-collector)
-  // produced spaghetti at large scale and didn't reflect actual relatedness.
+  // ── Roads: from LLM-identified semantic edges only ─────────────────────────
+  //
+  // The LLM emits `edges` as conversation-to-conversation links it judged
+  // semantically related. We map each endpoint's conv to its cluster city
+  // and persist one road per UNIQUE (clusterA, clusterB) pair. Multiple
+  // edges spanning the same two clusters are collapsed; intra-cluster edges
+  // are dropped (no road between a city and itself). The cascading
+  // bundleSharedTrunks renderer in Atlas.tsx then merges parallel trunks.
+  const cityIdByConvIdx = new Map<number, string>();
+  for (const [convIdx, asgn] of assignments) {
+    const key = `${asgn.countryIdx}:${asgn.districtIdx}`;
+    const cityId = cityIdByDistrict.get(key);
+    if (cityId) cityIdByConvIdx.set(convIdx, cityId);
+  }
+
+  type EdgeAgg = {
+    fromCityId: string;
+    toCityId: string;
+    type: "highway" | "regular" | "trail" | "ferry";
+    weight: number;
+    label: string | null;
+  };
+  const edgesByPair = new Map<string, EdgeAgg>();
+  const edgeKey = (a: string, b: string): string => (a < b ? `${a}|${b}` : `${b}|${a}`);
+  // "type" priority — when multiple LLM edges land in the same cluster pair,
+  // we keep the strongest type.
+  const typePriority = { highway: 3, regular: 2, trail: 1, ferry: 0 } as const;
+
+  for (const e of aiResult.edges ?? []) {
+    if (!Number.isInteger(e.fromCity) || !Number.isInteger(e.toCity)) continue;
+    const fromId = cityIdByConvIdx.get(e.fromCity);
+    const toId = cityIdByConvIdx.get(e.toCity);
+    if (!fromId || !toId || fromId === toId) continue;
+    const t = (e.type ?? "regular") as EdgeAgg["type"];
+    const k = edgeKey(fromId, toId);
+    const existing = edgesByPair.get(k);
+    if (!existing) {
+      edgesByPair.set(k, {
+        fromCityId: fromId,
+        toCityId: toId,
+        type: t,
+        weight: 1,
+        label: e.concept ?? null,
+      });
+    } else {
+      existing.weight += 1;
+      // Promote to a stronger road type if a later edge says so.
+      if (typePriority[t] > typePriority[existing.type]) existing.type = t;
+    }
+  }
+
+  const roadIds: string[] = [];
+  for (const e of edgesByPair.values()) {
+    const road = await prisma.road.create({
+      data: {
+        mapId,
+        fromId: e.fromCityId,
+        toId: e.toCityId,
+        type: e.type,
+        label: e.label,
+        weight: e.weight,
+      },
+      select: { id: true },
+    });
+    roadIds.push(road.id);
+  }
 
   return {
     countriesCreated: countryIdByIdx.size,
     citiesCreated: cityIdByDistrict.size,
-    roadsCreated: 0,
-    roadsCandidates: 0,
+    roadsCreated: roadIds.length,
+    roadsCandidates: aiResult.edges?.length ?? 0,
     conversationsPlaced: assignments.size,
     conversationsSkipped,
   };
