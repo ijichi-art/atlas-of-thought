@@ -89,6 +89,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       title: true,
       poiX: true,
       poiY: true,
+      poiKind: true,
       places: {
         where: { place: { level: "city" } },
         select: { placeId: true },
@@ -96,15 +97,23 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       },
     },
   });
+  const validKinds = new Set<NonNullable<POIData["kind"]>>([
+    "code", "research", "personal", "question", "creative", "decision",
+  ]);
   const pois: POIData[] = poiRows
     .filter((p) => p.places[0] && p.poiX !== null && p.poiY !== null)
-    .map((p) => ({
-      id: `poi-${p.id}`,
-      cityId: p.places[0].placeId,
-      conversationId: p.id,
-      label: p.title ?? "(untitled)",
-      position: [p.poiX!, p.poiY!] as Point,
-    }));
+    .map((p) => {
+      const kindCandidate = (p.poiKind ?? undefined) as POIData["kind"];
+      const kind = kindCandidate && validKinds.has(kindCandidate) ? kindCandidate : undefined;
+      return {
+        id: `poi-${p.id}`,
+        cityId: p.places[0].placeId,
+        conversationId: p.id,
+        label: p.title ?? "(untitled)",
+        position: [p.poiX!, p.poiY!] as Point,
+        kind,
+      };
+    });
 
   const dbRoads = await prisma.road.findMany({ where: { mapId } });
   const roads: RoadData[] = dbRoads.map((r) => ({

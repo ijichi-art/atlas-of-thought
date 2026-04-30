@@ -74,6 +74,7 @@ const POI = z.object({
   label: z.string(),
   labelJa: z.string().optional(),
   position: Point,
+  kind: z.enum(["code", "research", "personal", "question", "creative", "decision"]).optional(),
 });
 
 export const SampleMapSchema = z.object({

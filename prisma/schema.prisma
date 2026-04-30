@@ -248,6 +248,12 @@ model Conversation {
   // the conversation has been placed.
   poiX            Float?
   poiY            Float?
+  // Categorical POI kind, set by the cartographer LLM. One of:
+  // code | research | personal | question | creative | decision.
+  // Drives the pin color so each cluster city looks like a real Google
+  // Maps neighborhood (mix of red/purple/blue pins) instead of a swarm
+  // of identical dots. Null until terraform classifies it.
+  poiKind         String?
 
   map      Map                 @relation(fields: [mapId], references: [id], onDelete: Cascade)
   messages Message[]

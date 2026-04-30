@@ -75,6 +75,14 @@ export type CityData = {
 
 // One POI = one underlying conversation, scattered as a pin inside its
 // parent city's built-up area. Visible only at street-level zoom.
+export type POIKind =
+  | "code"
+  | "research"
+  | "personal"
+  | "question"
+  | "creative"
+  | "decision";
+
 export type POIData = {
   id: string;
   cityId: string;
@@ -82,6 +90,9 @@ export type POIData = {
   label: string;
   labelJa?: string;
   position: Point;
+  // Categorical type — drives pin color in POILayer. When absent the
+  // renderer falls back to the generic question-gray pin.
+  kind?: POIKind;
 };
 
 export type SampleMap = {

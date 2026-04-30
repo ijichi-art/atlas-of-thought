@@ -62,12 +62,25 @@ type AiCountry = {
   districts: AiDistrict[];
 };
 
+// Categorical POI kind. Drives the pin color in the renderer so cluster
+// cities mix Google-Maps-style red/purple/blue pins instead of a swarm of
+// identical dots. Validated against this whitelist before persistence —
+// the LLM occasionally hallucinates extras.
+export type AiCityKind =
+  | "code"
+  | "research"
+  | "personal"
+  | "question"
+  | "creative"
+  | "decision";
+
 type AiCity = {
   conversationIndex: number;
   topic: string;
   topicJa?: string;
   summary: string;
   rank: "capital" | "city" | "town";
+  kind?: AiCityKind;
 };
 
 type AiEdge = {
@@ -304,6 +317,14 @@ LEVEL 3 — CITIES (one per conversation):
 - TopicJa: optional Japanese phrase.
 - Summary: ONE concise sentence about what was discussed and concluded.
 - Rank: "capital" for the most substantial conversation in its country (only ONE per country); "city" for medium; "town" for short or peripheral.
+- Kind: ONE of these six values, picking the BEST single fit:
+    "code"      — programming, debugging, implementation, technical setup
+    "research"  — investigating, learning, exploring a topic in depth
+    "personal"  — life, social, hobbies, casual chitchat
+    "question"  — short factual Q&A, single-turn lookups
+    "creative"  — writing, design, ideation, naming, copywriting
+    "decision"  — planning, choosing between options, deciding next steps
+  Pick exactly one; this drives the POI pin color on the map.
 
 LEVEL 4 — EDGES (semantic roads):
 - Pairs of conversations that share a meaningful concept, technique, decision, or causal link.
@@ -337,7 +358,8 @@ Output JSON only, this exact shape:
       "topic": "JWT token refresh strategy",
       "topicJa": "トークン更新",
       "summary": "Designed a refresh-token rotation flow that handles expired sessions gracefully.",
-      "rank": "capital"
+      "rank": "capital",
+      "kind": "code"
     }
   ],
   "edges": [
@@ -1800,6 +1822,18 @@ export async function terraform(
       rng = (Math.imul(rng, 1664525) + 1013904223) >>> 0;
       return rng / 0xffffffff;
     };
+    // Whitelist for the LLM-supplied 'kind'. Anything outside falls back
+    // to "question" (most generic, gray pin) so the renderer always has
+    // a valid color to map to.
+    const validKinds = new Set<AiCityKind>([
+      "code",
+      "research",
+      "personal",
+      "question",
+      "creative",
+      "decision",
+    ]);
+
     for (const poi of pois) {
       const conv = inputs[poi.convIdx];
       // sqrt for uniform area distribution in a disk; 0.05 inner padding
@@ -1808,9 +1842,13 @@ export async function terraform(
       const ang = next() * Math.PI * 2;
       const px = cx + Math.cos(ang) * r;
       const py = cy + Math.sin(ang) * r;
+      const aiCity = aiResult.cities.find((c) => c.conversationIndex === poi.convIdx);
+      const rawKind = aiCity?.kind as AiCityKind | undefined;
+      const kind: AiCityKind | null =
+        rawKind && validKinds.has(rawKind) ? rawKind : null;
       await prisma.conversation.update({
         where: { id: conv.id },
-        data: { poiX: px, poiY: py },
+        data: { poiX: px, poiY: py, poiKind: kind ?? "question" },
       });
       await prisma.placeConversation.create({
         data: { placeId: city.id, conversationId: conv.id },
