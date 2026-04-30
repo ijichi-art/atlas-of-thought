@@ -42,9 +42,10 @@ export const ATLAS_STYLE = {
     blobOuterStop: 1.0,
     blobInnerOpacity: 1.0,
     blobOuterOpacity: 0.0,
-    // Slightly darker than country fill (#ece5d3) so cluster cores read
-    // as "denser built-up" without a hard boundary line.
-    blobColor: "#ddd0b5",
+    // Notably darker than country fill (#ece5d3) so cluster cores stand
+    // out clearly. Earlier #ddd0b5 was too close to the country tone and
+    // clusters disappeared under road clutter at default zoom.
+    blobColor: "#cfb78a",
   },
 
   // ── Country (land mass + name label) ───────────────────────────────────────
@@ -191,33 +192,45 @@ export const ATLAS_STYLE = {
     // bezier control point from the segment endpoints alone, so any roads
     // sharing a trunk segment trace identical curves regardless of type.
     //
-    // LOD strategy (matches what Google Maps does at zoom 5/8/12/15):
-    //   highway   → always visible (regional skeleton)
-    //   regular   → mid-zoom on (the "arterial network")
-    //   trail     → street-level only (the "local roads")
-    //   ferry     → mid-zoom (always salient because it's blue dashed)
-    // At default zoom 1.0 only highway + regular are drawn — keeps wide-view
-    // density comparable to Google Maps' equivalent zoom rather than
-    // showing the full tangled mesh at once.
+    // Roads here represent SEMANTIC links (cluster→cluster), not physical
+    // infrastructure. They have to read as background — bold yellow strokes
+    // were dominating the canvas at zoom 1, drowning out the cities. Now:
+    //   - widths halved (highway 6→2.5, regular 4→1.2, trail 2.5→0.8)
+    //   - colors desaturated (less yellow, more "pale arterial")
+    //   - weight-based LOD: weak edges (weight=1) only show in a narrow
+    //     mid-zoom band; strong edges always show. Drops visible road
+    //     count from ~230 to ~30-50 at default zoom — matches the visible
+    //     street count at Manhattan zoom 14 (~30-40).
     highway: {
-      casing: { color: "#e89c30", width: 8 } as { color: string; width: number } | undefined,
-      fill: { color: "#fbcd5d", width: 6, dash: undefined as string | undefined, opacity: 1 },
+      casing: { color: "#dba955", width: 4.5 } as { color: string; width: number } | undefined,
+      fill: { color: "#f0d585", width: 2.5, dash: undefined as string | undefined, opacity: 1 },
       minScale: 0,
+      maxScale: Infinity,
+      // Weight floor — render even weight=1 highways. Highways are the
+      // skeleton; you always want some visible.
+      weightFloor: 0,
     },
     regular: {
-      casing: { color: "#e8c878", width: 6 } as { color: string; width: number } | undefined,
-      fill: { color: "#fde2a0", width: 4, dash: undefined as string | undefined, opacity: 1 },
-      minScale: 1.0,
+      casing: { color: "#e0cf9c", width: 2.4 } as { color: string; width: number } | undefined,
+      fill: { color: "#f5e7b8", width: 1.2, dash: undefined as string | undefined, opacity: 1 },
+      minScale: 0,
+      maxScale: 2.0,
+      // Hide weight=1 regular roads everywhere — they're the noisy fragments.
+      weightFloor: 2,
     },
     trail: {
-      casing: { color: "#d8d4ca", width: 4 } as { color: string; width: number } | undefined,
-      fill: { color: "#ffffff", width: 2.5, dash: undefined as string | undefined, opacity: 1 },
-      minScale: 1.5,
+      casing: { color: "#d8d4ca", width: 1.5 } as { color: string; width: number } | undefined,
+      fill: { color: "#ffffff", width: 0.8, dash: undefined as string | undefined, opacity: 0.9 },
+      minScale: 0.7,
+      maxScale: 1.8,
+      weightFloor: 2,
     },
     ferry: {
       casing: undefined as undefined | { color: string; width: number },
-      fill: { color: "#1976d2", width: 1.5, dash: "4 3" as string | undefined, opacity: 0.9 },
-      minScale: 1.0,
+      fill: { color: "#1976d2", width: 1.0, dash: "4 3" as string | undefined, opacity: 0.85 },
+      minScale: 0.6,
+      maxScale: 2.0,
+      weightFloor: 0,
     },
   },
 
@@ -232,11 +245,11 @@ export const ATLAS_STYLE = {
   // ── POIs (individual conversations inside a cluster city) ────────────────
   poi: {
     minScale: 1.0, // visible at default zoom — they're the city's interior
-    labelMinScale: 2.5, // labels need more headroom — too dense otherwise
-    outerR: 3,
-    fill: "#d65a4a", // --landmark-poi
+    labelMinScale: 2.0, // labels at city zoom so user can read POI text
+    outerR: 5, // ~70% bigger so they read as the foreground above streets
+    fill: "#d65a4a", // legacy fallback (kind-based color in POILayer)
     stroke: "#ffffff",
-    strokeWidth: 1.0,
+    strokeWidth: 1.5,
     selectionPad: 4,
     selectionHaloColor: "#1976d2",
     selectionHaloOpacity: 0.22,
@@ -249,7 +262,8 @@ export const ATLAS_STYLE = {
   },
 
   // ── Road labels (textPath along the road) ─────────────────────────────────
-  // Only highway/arterial roads get a name label, and only at detail zoom.
+  // Only highway/arterial roads get a name label, and only at very tight
+  // detail zoom (street level). Labels at default zoom were major clutter.
   roadLabel: {
     fontSize: 9, // user units; rendered as 9 / scale to stay constant on screen
     fontWeight: 500,
@@ -257,7 +271,7 @@ export const ATLAS_STYLE = {
     haloColor: "#ffffff",
     haloWidth: 2.5,
     letterSpacing: 0.3,
-    minScale: 1.2,
+    minScale: 2.5,
     // Show labels only on these road types (others stay anonymous).
     showOnTypes: ["highway", "regular"] as Array<"highway" | "regular" | "trail" | "ferry">,
   },

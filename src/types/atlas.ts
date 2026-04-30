@@ -41,6 +41,11 @@ export type RoadData = {
   toCityId: string;
   type: RoadType;
   label?: string;
+  // Aggregated edge strength from terraform: number of LLM-identified
+  // semantic edges that collapsed onto this cluster pair. Drives the
+  // weight-based LOD filter — weak (weight=1) connections are hidden at
+  // most zoom levels, strong ones are always visible.
+  weight?: number;
   // Optional intermediate path points; if present, the road renders as a
   // smooth curve (Catmull-Rom) through fromCity → waypoints → toCity.
   waypoints?: Point[];

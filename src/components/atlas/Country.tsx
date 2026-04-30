@@ -93,8 +93,9 @@ function countryLevelParks(
 type BuildingRect = { x: number; y: number; w: number; h: number; rot: number };
 function buildingsForCity(city: CityData): BuildingRect[] {
   const r = effectiveBuiltUpR(city);
-  // Roughly 1 building per 200 px² of disk area, capped 40.
-  const target = Math.min(40, Math.max(8, Math.round((Math.PI * r * r) / 600)));
+  // Doubled density — Manhattan reads as a dense field of buildings, not a
+  // few sparse rects. Capped 80 to keep render cost reasonable.
+  const target = Math.min(80, Math.max(16, Math.round((Math.PI * r * r) / 300)));
   let s = hashStr(city.id) ^ 0xc0ffee00;
   const next = (): number => {
     s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
@@ -200,7 +201,7 @@ export function Country({
               y={b.y - b.h / 2}
               width={b.w}
               height={b.h}
-              fill="#cdb89a"
+              fill="#a8916e"
               transform={`rotate(${(b.rot * 180) / Math.PI} ${b.x} ${b.y})`}
             />
           )),

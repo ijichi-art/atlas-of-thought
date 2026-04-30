@@ -69,8 +69,16 @@ export function Road({
   if (!from || !to) return null;
 
   const style = ATLAS_STYLE.road[data.type];
-  // Hide roads below their type's minScale to declutter at wide view.
+  // Zoom range filter (minScale ≤ scale ≤ maxScale). Roads outside the
+  // range are hidden to keep each zoom level readable: regional view shows
+  // highways, neighbourhood zoom shows the cluster grid (CityBlocks) instead
+  // of the cross-cluster mesh.
   if (scale < style.minScale) return null;
+  if (style.maxScale !== undefined && scale > style.maxScale) return null;
+  // Weight-based filter: weak edges (single LLM mention) get hidden so the
+  // user sees the actual semantic backbone instead of every fragment.
+  const weight = data.weight ?? 1;
+  if (style.weightFloor !== undefined && weight < style.weightFloor) return null;
 
   const points: [number, number][] = [
     from.position,

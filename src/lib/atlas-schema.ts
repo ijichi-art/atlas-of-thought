@@ -64,6 +64,7 @@ const Road = z.object({
   toCityId: z.string(),
   type: z.enum(["highway", "regular", "trail", "ferry"]),
   label: z.string().optional(),
+  weight: z.number().optional(),
   waypoints: z.array(Point).optional(),
 });
 
