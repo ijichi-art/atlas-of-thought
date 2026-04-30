@@ -1917,25 +1917,78 @@ export async function terraform(
     else nonMstEdges.push(e);
   }
 
-  // Tier assignment by MST rank.
+  // ── Orphan resolution ─────────────────────────────────────────────────────
+  // MST gives every cluster reachability but ~half become degree-1 leaves
+  // (dead-ends). Real cities have NO dead-end neighbourhoods at the
+  // arterial level — every district has 2+ connections so traffic can
+  // flow through. Augment by adding the highest-weight non-MST edge that
+  // touches each leaf cluster.
+  const degree = new Map<string, number>();
+  const bumpDeg = (id: string, delta: number) =>
+    degree.set(id, (degree.get(id) ?? 0) + delta);
+  for (const e of mstEdges) {
+    bumpDeg(e.fromCityId, 1);
+    bumpDeg(e.toCityId, 1);
+  }
+  const usedAlpha = new Set<EdgeAgg>();
+  // Sweep orphans (degree 1) in decreasing weight order so the strongest
+  // edges are chosen first.
+  const orphans = Array.from(degree.entries())
+    .filter(([, d]) => d === 1)
+    .map(([id]) => id);
+  for (const orphan of orphans) {
+    if ((degree.get(orphan) ?? 0) >= 2) continue; // already fixed by an earlier sweep
+    const candidate = nonMstEdges.find(
+      (e) =>
+        !usedAlpha.has(e) &&
+        (e.fromCityId === orphan || e.toCityId === orphan),
+    );
+    if (candidate) {
+      usedAlpha.add(candidate);
+      bumpDeg(candidate.fromCityId, 1);
+      bumpDeg(candidate.toCityId, 1);
+    }
+  }
+
+  // ── Top-up alpha to ~15% of MST size for bypass redundancy ─────────────────
   const N = mstEdges.length;
-  const highwayCount = Math.max(1, Math.round(N * 0.25));
-  const regularCount = Math.max(1, Math.round(N * 0.5));
+  const targetAlpha = Math.max(0, Math.round(N * 0.15));
+  for (const e of nonMstEdges) {
+    if (usedAlpha.size >= targetAlpha) break;
+    if (usedAlpha.has(e)) continue;
+    usedAlpha.add(e);
+  }
+  const alphaEdges = Array.from(usedAlpha);
+
+  // ── Tier assignment per FHWA functional classification ratio 1 : 2 : 4 ────
+  // Highways form the regional skeleton (bold), arterials carry medium
+  // traffic, trails handle the bulk (per-cluster collectors + bypass alpha).
+  const highwayCount = Math.max(1, Math.round(N * 0.17));
+  const regularCount = Math.max(1, Math.round(N * 0.33));
   for (let i = 0; i < N; i++) {
     if (i < highwayCount) mstEdges[i].type = "highway";
     else if (i < highwayCount + regularCount) mstEdges[i].type = "regular";
     else mstEdges[i].type = "trail";
   }
-
-  // Alpha: top 15% non-MST edges by weight, all rendered as "trail".
-  const alphaCount = Math.max(0, Math.round(N * 0.15));
-  const alphaEdges = nonMstEdges.slice(0, alphaCount);
   for (const e of alphaEdges) e.type = "trail";
 
   const finalEdges = [...mstEdges, ...alphaEdges];
 
+  // Diagnostics: degree distribution + tier counts.
+  let degSum = 0;
+  let degMin = Infinity;
+  let degMax = 0;
+  let leafCount = 0;
+  for (const d of degree.values()) {
+    degSum += d;
+    degMin = Math.min(degMin, d);
+    degMax = Math.max(degMax, d);
+    if (d <= 1) leafCount++;
+  }
+  const avgDeg = degree.size > 0 ? degSum / degree.size : 0;
+  const trailCount = N - highwayCount - regularCount + alphaEdges.length;
   console.log(
-    `[terraform] road hierarchy: ${highwayCount} highway / ${regularCount} regular / ${N - highwayCount - regularCount + alphaCount} trail (out of ${allEdges.length} candidate edges; ${allEdges.length - finalEdges.length} dropped as non-infrastructure semantic links)`,
+    `[terraform] road hierarchy: highway=${highwayCount} regular=${regularCount} trail=${trailCount} (MST=${N} + alpha=${alphaEdges.length}, dropped ${allEdges.length - finalEdges.length} non-infra edges) | cluster degree avg=${avgDeg.toFixed(2)} min=${degMin === Infinity ? 0 : degMin} max=${degMax} leaves=${leafCount}/${degree.size}`,
   );
 
   const roadIds: string[] = [];
