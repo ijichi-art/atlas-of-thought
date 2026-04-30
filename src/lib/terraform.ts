@@ -905,9 +905,13 @@ function layoutAll(
   const seed = deterministicSeed(seedParts);
   const rng = mulberry32(seed);
 
-  // Step 1: country centers — start in a ring, then force-adjust using neighbor links
+  // ── Step 1: country centers ────────────────────────────────────────────────
+  // Force-directed layout for country anchors. The previous version capped
+  // distance-from-center at 280px, leaving the outer 65% of the canvas
+  // unused — every country crammed into a 560×560 box. Now countries spread
+  // across the full canvas with edge-margin clamping instead.
   const Nc = ai.countries.length;
-  const ringR = Math.min(VIEW_W, VIEW_H) * 0.22; // tighter initial ring (was 0.32)
+  const ringR = Math.min(VIEW_W, VIEW_H) * 0.32;
   const countryNodes: CountryNode[] = Array.from({ length: Nc }, (_, i) => {
     const angle = (2 * Math.PI * i) / Nc - Math.PI / 2 + (rng() - 0.5) * 0.4;
     return { i, x: CX + ringR * Math.cos(angle), y: CY + ringR * Math.sin(angle) };
@@ -925,15 +929,15 @@ function layoutAll(
   }
 
   const cSim = forceSimulation<CountryNode>(countryNodes)
-    .force("repel", forceManyBody().strength(-1500)) // less aggressive (was -3000)
-    .force("center", forceCenter(CX, CY).strength(0.18)) // stronger pull to center (was 0.06)
-    .force("collide", forceCollide(140)) // smaller collision radius (was 170)
+    .force("repel", forceManyBody().strength(-2200))
+    .force("center", forceCenter(CX, CY).strength(0.04))
+    .force("collide", forceCollide(180))
     .force("attract", () => {
       for (const l of links) {
         const dx = (l.target.x ?? 0) - (l.source.x ?? 0);
         const dy = (l.target.y ?? 0) - (l.source.y ?? 0);
         const d = Math.sqrt(dx * dx + dy * dy) || 1;
-        const f = (d - 220) * 0.06 * l.strength;
+        const f = (d - 280) * 0.06 * l.strength;
         l.source.x = (l.source.x ?? 0) + (dx / d) * f;
         l.source.y = (l.source.y ?? 0) + (dy / d) * f;
         l.target.x = (l.target.x ?? 0) - (dx / d) * f;
@@ -941,218 +945,163 @@ function layoutAll(
       }
     })
     .stop();
-
   for (let t = 0; t < 300; t++) cSim.tick();
 
-  // Hard cap: no country may sit further than this from the map center.
-  // Prevents one isolated country from drifting into "lonely island" territory.
-  const MAX_DIST_FROM_CENTER = 280;
+  // Clamp to canvas with margin (countries need room for their clusters).
+  const COUNTRY_MARGIN = 200;
   for (const node of countryNodes) {
-    const dx = (node.x ?? CX) - CX;
-    const dy = (node.y ?? CY) - CY;
-    const d = Math.sqrt(dx * dx + dy * dy);
-    if (d > MAX_DIST_FROM_CENTER) {
-      node.x = CX + (dx / d) * MAX_DIST_FROM_CENTER;
-      node.y = CY + (dy / d) * MAX_DIST_FROM_CENTER;
+    node.x = Math.max(COUNTRY_MARGIN, Math.min(VIEW_W - COUNTRY_MARGIN, node.x ?? CX));
+    node.y = Math.max(COUNTRY_MARGIN, Math.min(VIEW_H - COUNTRY_MARGIN, node.y ?? CY));
+  }
+  let countryCenters: Array<[number, number]> = countryNodes.map((n) => [n.x ?? CX, n.y ?? CY]);
+
+  // ── Step 2: cluster city placement (the key fix) ──────────────────────────
+  // Each LLM district becomes a cluster city. We treat the cluster — NOT the
+  // individual conversation — as the first-class layout entity. Each cluster
+  // is a node in a force simulation:
+  //   - country pull keeps clusters inside their country region
+  //   - collide based on builtUpR keeps cluster disks from overlapping
+  //   - cross-cluster spring (LLM edges) pulls semantically related clusters
+  //     together (especially across countries — the "long cross-canvas
+  //     spaghetti road" problem)
+  //
+  // Conversations (POIs) are then trivially scattered inside their cluster's
+  // disk in Step 3 — no inter-POI separation needed because they live in
+  // the same neighborhood.
+  type ClusterNode = SimulationNodeDatum & {
+    countryIdx: number;
+    districtIdx: number;
+    convIndices: number[];
+    builtUpR: number;
+  };
+  const clusters: ClusterNode[] = [];
+  // Map from convIdx → its cluster (so we can wire LLM edges).
+  const clusterByConvIdx = new Map<number, ClusterNode>();
+  for (let ci = 0; ci < ai.countries.length; ci++) {
+    const districts = ai.countries[ci].districts ?? [];
+    for (let di = 0; di < districts.length; di++) {
+      const idxs = (districts[di].cityIndexes ?? []).filter(
+        (i): i is number => Number.isInteger(i) && i >= 0,
+      );
+      if (idxs.length === 0) continue;
+      // Same formula as terraform persistence so layout matches render size.
+      const builtUpR = Math.max(60, 32 * Math.sqrt(idxs.length));
+      // Initial position: jittered around country center.
+      const jitter = mulberry32(seed + ci * 9871 + di * 113);
+      const ang = jitter() * Math.PI * 2;
+      const dist = jitter() * 60;
+      const node: ClusterNode = {
+        countryIdx: ci,
+        districtIdx: di,
+        convIndices: idxs,
+        builtUpR,
+        x: countryCenters[ci][0] + Math.cos(ang) * dist,
+        y: countryCenters[ci][1] + Math.sin(ang) * dist,
+      };
+      clusters.push(node);
+      for (const idx of idxs) clusterByConvIdx.set(idx, node);
     }
   }
 
-  const countryCenters: Array<[number, number]> = countryNodes.map((n) => clamp(n.x ?? CX, n.y ?? CY, 220));
-
-  // Step 2: structured city placement per the user's spec
-  //   - capital → at cluster (country) center (with tiny jitter)
-  //   - major cities (rank "city") → 200-400px from capital, random angle
-  //   - towns → scattered 80-500px from capital
-  //   - all cities maintain ≥ MIN_SEP separation (overlap prevention)
-  const MIN_SEP = 100;
-
-  // Group cities by country
-  type CityEntry = { convIdx: number; rank: "capital" | "city" | "town" };
-  const byCountry = new Map<number, CityEntry[]>();
-  for (const [convIdx, asgn] of assignments) {
-    const aiCity = ai.cities.find((c) => c.conversationIndex === convIdx);
-    const rank = aiCity?.rank ?? "town";
-    if (!byCountry.has(asgn.countryIdx)) byCountry.set(asgn.countryIdx, []);
-    byCountry.get(asgn.countryIdx)!.push({ convIdx, rank });
+  // Cluster-level edge springs from LLM edges.
+  type ClusterLink = { source: ClusterNode; target: ClusterNode; strength: number };
+  const clusterLinks: ClusterLink[] = [];
+  for (const e of ai.edges ?? []) {
+    const s = clusterByConvIdx.get(e.fromCity);
+    const t = clusterByConvIdx.get(e.toCity);
+    if (!s || !t || s === t) continue;
+    const sameCountry = s.countryIdx === t.countryIdx;
+    // Cross-country edges pull harder (those are the cross-canvas roads
+    // we need to compress); same-country edges pull weakly because the
+    // country-pull force already keeps siblings close.
+    clusterLinks.push({
+      source: s,
+      target: t,
+      strength: sameCountry ? 0.05 : 0.25,
+    });
   }
 
+  const clusterSim = forceSimulation<ClusterNode>(clusters)
+    // Country pull: each cluster gets pulled toward its country center.
+    .force("country", () => {
+      for (const c of clusters) {
+        const center = countryCenters[c.countryIdx];
+        const dx = center[0] - (c.x ?? 0);
+        const dy = center[1] - (c.y ?? 0);
+        c.x = (c.x ?? 0) + dx * 0.05;
+        c.y = (c.y ?? 0) + dy * 0.05;
+      }
+    })
+    // Cluster collide: disks shouldn't overlap. Slightly bigger than
+    // builtUpR so there's a visible "street" margin between cluster cores.
+    .force("collide", forceCollide<ClusterNode>((d) => d.builtUpR * 1.05).strength(0.9))
+    // Cluster repel: long-range push so clusters spread out nicely.
+    .force("repel", forceManyBody().strength(-300))
+    // Edge attraction.
+    .force("edges", () => {
+      for (const l of clusterLinks) {
+        const dx = (l.target.x ?? 0) - (l.source.x ?? 0);
+        const dy = (l.target.y ?? 0) - (l.source.y ?? 0);
+        const d = Math.sqrt(dx * dx + dy * dy) || 1;
+        // Target distance: clusters touching with a small gap.
+        const targetLen = (l.source.builtUpR + l.target.builtUpR) * 1.15;
+        const f = (d - targetLen) * l.strength;
+        l.source.x = (l.source.x ?? 0) + (dx / d) * f * 0.5;
+        l.source.y = (l.source.y ?? 0) + (dy / d) * f * 0.5;
+        l.target.x = (l.target.x ?? 0) - (dx / d) * f * 0.5;
+        l.target.y = (l.target.y ?? 0) - (dy / d) * f * 0.5;
+      }
+    })
+    // Canvas edge: keep clusters inside the canvas (with builtUpR margin).
+    .force("canvas", () => {
+      for (const c of clusters) {
+        const m = c.builtUpR + 30;
+        if ((c.x ?? 0) < m) c.x = m;
+        if ((c.x ?? 0) > VIEW_W - m) c.x = VIEW_W - m;
+        if ((c.y ?? 0) < m) c.y = m;
+        if ((c.y ?? 0) > VIEW_H - m) c.y = VIEW_H - m;
+      }
+    })
+    .stop();
+
+  // Run for plenty of ticks — cluster sim is small (≤ 150 nodes) so cheap.
+  for (let t = 0; t < 400; t++) clusterSim.tick();
+
+  // ── Step 3: POI scatter inside cluster disks ──────────────────────────────
+  // Each conversation lands at a random point inside its cluster's built-up
+  // disk (sqrt-distributed for uniform area density). No inter-POI
+  // separation is enforced — they live in the same cluster, allowed to
+  // be close together (matches Manhattan POI density).
   const positions = new Map<number, [number, number]>();
-
-  for (const [countryIdx, cities] of byCountry) {
-    const center = countryCenters[countryIdx];
-    const localRng = mulberry32(seed + countryIdx * 7919 + 1);
-    const placed: [number, number][] = [];
-
-    const tryPlace = (
-      rMin: number,
-      rMax: number,
-      maxAttempts: number,
-    ): [number, number] => {
-      // First pass: try to satisfy hard separation
-      for (let attempt = 0; attempt < maxAttempts; attempt++) {
-        const r = rMin + localRng() * (rMax - rMin);
-        const theta = localRng() * 2 * Math.PI;
-        const cand: [number, number] = [
-          center[0] + r * Math.cos(theta),
-          center[1] + r * Math.sin(theta),
-        ];
-        if (cand[0] < 60 || cand[0] > VIEW_W - 60) continue;
-        if (cand[1] < 60 || cand[1] > VIEW_H - 60) continue;
-        let ok = true;
-        for (const p of placed) {
-          if (pdist(cand, p) < MIN_SEP) {
-            ok = false;
-            break;
-          }
-        }
-        if (ok) return cand;
-      }
-      // Fallback: pick the candidate with largest minimum distance to placed
-      let best: [number, number] = center;
-      let bestD = -Infinity;
-      for (let attempt = 0; attempt < 50; attempt++) {
-        const r = rMin + localRng() * (rMax - rMin);
-        const theta = localRng() * 2 * Math.PI;
-        const cand = clamp(
-          center[0] + r * Math.cos(theta),
-          center[1] + r * Math.sin(theta),
-          60,
-        );
-        const minD = placed.length === 0 ? Infinity : Math.min(...placed.map((p) => pdist(cand, p)));
-        if (minD > bestD) {
-          bestD = minD;
-          best = cand;
-        }
-      }
-      return best;
+  for (const c of clusters) {
+    let s = (deterministicSeed([`cluster-${c.countryIdx}-${c.districtIdx}`]) ^ 0xdeadbeef) >>> 0;
+    const next = (): number => {
+      s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+      return s / 0xffffffff;
     };
-
-    // Capital: at country center with small jitter
-    const capital = cities.find((c) => c.rank === "capital");
-    if (capital) {
-      const jitterAngle = localRng() * 2 * Math.PI;
-      const jitterR = localRng() * 20;
-      const capPos: [number, number] = [
-        center[0] + jitterR * Math.cos(jitterAngle),
-        center[1] + jitterR * Math.sin(jitterAngle),
-      ];
-      positions.set(capital.convIdx, capPos);
-      placed.push(capPos);
-    }
-
-    // Major cities: radial 200-400 from capital
-    for (const c of cities.filter((x) => x.rank === "city")) {
-      const pos = tryPlace(200, 400, 100);
-      positions.set(c.convIdx, pos);
-      placed.push(pos);
-    }
-
-    // Towns: scattered 80-500 (whole cluster), min separation
-    for (const c of cities.filter((x) => x.rank === "town")) {
-      const pos = tryPlace(80, 500, 100);
-      positions.set(c.convIdx, pos);
-      placed.push(pos);
+    for (const convIdx of c.convIndices) {
+      // sqrt for uniform-area distribution; 0.05 inner padding.
+      const r = Math.sqrt(0.05 + 0.95 * next()) * c.builtUpR * 0.85;
+      const ang = next() * Math.PI * 2;
+      positions.set(convIdx, [
+        (c.x ?? 0) + Math.cos(ang) * r,
+        (c.y ?? 0) + Math.sin(ang) * r,
+      ]);
     }
   }
 
-  // ── Edge-based refinement ─────────────────────────────────────────────────
-  //
-  // The structured scatter above is purely positional (rank → radius from
-  // country center). It ignores the LLM-identified semantic edges between
-  // conversations, so deeply-related convs in different countries can end
-  // up far apart and their cluster road becomes a long cross-canvas line.
-  //
-  // Run a few hundred ticks of force-directed refinement on top of the
-  // initial scatter. Each LLM edge becomes a spring (target length 120 px)
-  // pulling its two endpoints together; the per-rank country-center pull
-  // is kept so capitals don't drift, plus a collide for separation. The
-  // result: semantically-linked clusters compress geographically, dropping
-  // the average road length significantly.
-  if ((ai.edges ?? []).length > 0) {
-    type RNode = SimulationNodeDatum & {
-      i: number;
-      countryIdx: number;
-      rank: "capital" | "city" | "town";
-    };
-    const nodes: RNode[] = [];
-    for (const [convIdx, asgn] of assignments) {
-      const p = positions.get(convIdx);
-      if (!p) continue;
-      const aiCity = ai.cities.find((c) => c.conversationIndex === convIdx);
-      nodes.push({
-        i: convIdx,
-        countryIdx: asgn.countryIdx,
-        rank: aiCity?.rank ?? "town",
-        x: p[0],
-        y: p[1],
-      });
-    }
-    const nodeByIdx = new Map<number, RNode>(nodes.map((n) => [n.i, n]));
-
-    type RLink = { source: RNode; target: RNode; strength: number };
-    const links: RLink[] = [];
-    for (const e of ai.edges ?? []) {
-      const s = nodeByIdx.get(e.fromCity);
-      const t = nodeByIdx.get(e.toCity);
-      if (!s || !t) continue;
-      // Cross-country edges pull harder — those are the long roads we
-      // need to compress. Intra-country links pull lightly so the
-      // existing rank-based structure isn't blown up.
-      const sameCountry = s.countryIdx === t.countryIdx;
-      links.push({ source: s, target: t, strength: sameCountry ? 0.04 : 0.18 });
-    }
-
-    const TARGET_LEN = 120;
-    const refineSim = forceSimulation<RNode>(nodes)
-      .force("collide", forceCollide(60))
-      .force("country", () => {
-        for (const n of nodes) {
-          const c = countryCenters[n.countryIdx];
-          if (!c) continue;
-          const dx = c[0] - (n.x ?? 0);
-          const dy = c[1] - (n.y ?? 0);
-          const k =
-            n.rank === "capital" ? 0.1 : n.rank === "city" ? 0.03 : 0.015;
-          n.x = (n.x ?? 0) + dx * k;
-          n.y = (n.y ?? 0) + dy * k;
-        }
-      })
-      .force("edges", () => {
-        for (const l of links) {
-          const dx = (l.target.x ?? 0) - (l.source.x ?? 0);
-          const dy = (l.target.y ?? 0) - (l.source.y ?? 0);
-          const d = Math.sqrt(dx * dx + dy * dy) || 1;
-          const f = (d - TARGET_LEN) * l.strength;
-          l.source.x = (l.source.x ?? 0) + (dx / d) * f * 0.5;
-          l.source.y = (l.source.y ?? 0) + (dy / d) * f * 0.5;
-          l.target.x = (l.target.x ?? 0) - (dx / d) * f * 0.5;
-          l.target.y = (l.target.y ?? 0) - (dy / d) * f * 0.5;
-        }
-      })
-      .stop();
-
-    for (let t = 0; t < 200; t++) refineSim.tick();
-
-    for (const n of nodes) {
-      positions.set(n.i, clamp(n.x ?? CX, n.y ?? CY, 60));
-    }
-  }
-
-  // Recompute country centers as actual centroid of their final cities
+  // Recompute country centers as the centroid of THEIR clusters' final
+  // positions — used downstream for country polygon construction.
   const cAcc: { x: number; y: number; count: number }[] = countryCenters.map(() => ({
-    x: 0,
-    y: 0,
-    count: 0,
+    x: 0, y: 0, count: 0,
   }));
-  for (const [convIdx, asgn] of assignments) {
-    const p = positions.get(convIdx);
-    if (!p) continue;
-    cAcc[asgn.countryIdx].x += p[0];
-    cAcc[asgn.countryIdx].y += p[1];
-    cAcc[asgn.countryIdx].count++;
+  for (const c of clusters) {
+    cAcc[c.countryIdx].x += c.x ?? 0;
+    cAcc[c.countryIdx].y += c.y ?? 0;
+    cAcc[c.countryIdx].count++;
   }
-  const finalCenters: Array<[number, number]> = countryCenters.map(([x, y], i) =>
-    cAcc[i].count > 0 ? [cAcc[i].x / cAcc[i].count, cAcc[i].y / cAcc[i].count] : [x, y],
+  const finalCenters: Array<[number, number]> = countryCenters.map((cur, i) =>
+    cAcc[i].count > 0 ? [cAcc[i].x / cAcc[i].count, cAcc[i].y / cAcc[i].count] : cur,
   );
 
   return { positions, countryCenters: finalCenters };
