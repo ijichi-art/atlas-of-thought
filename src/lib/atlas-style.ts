@@ -42,13 +42,20 @@ export const ATLAS_STYLE = {
     blobOuterStop: 1.0,
     blobInnerOpacity: 1.0,
     blobOuterOpacity: 0.0,
-    blobColor: "#ece5d3", // --map-built-up
+    // Slightly darker than country fill (#ece5d3) so cluster cores read
+    // as "denser built-up" without a hard boundary line.
+    blobColor: "#ddd0b5",
   },
 
   // ── Country (land mass + name label) ───────────────────────────────────────
   country: {
     useUniformFill: true,
-    fillColor: "#e0e8d0", // --map-land (yellow-green, eyedropped from Google Maps)
+    // Built-up beige across the whole country — matches Manhattan / LA /
+    // Chicago at neighborhood zoom, where the city covers the viewport
+    // continuously and green is the exception (parks). Cluster cities then
+    // use a slightly DARKER beige (civil.blobColor) to subtly distinguish
+    // their cores without drawing hard polygon boundaries.
+    fillColor: "#ece5d3", // --map-built-up
     strokeColor: "#b8b3a8", // --border-country
     strokeWidth: 1.5,
     strokeDash: "4 3", // dotted border per spec rule G

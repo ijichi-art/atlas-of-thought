@@ -23,28 +23,99 @@ function pickBiome(name: string): "forest" | "desert" {
   return ((h >>> 0) & 1) === 0 ? "forest" : "desert";
 }
 
-// Synthetic parks scattered inside each city's built-up area. Clipped to the
-// country polygon so parks never spill outside borders. Per spec rule F:
-// 1–3 parks per city, var(--map-park) green, irregular polygon.
-function parksForCity(city: CityData): Array<[number, number][]> {
-  const count = city.rank === "capital" ? 2 : city.rank === "city" ? 1 : 0;
-  if (count === 0) return [];
-  const parkBaseR = city.rank === "capital" ? 32 : 22;
-  const cityR = builtUpRadius(city.rank);
-  let s = hashStr(city.id) ^ 0xa5a5a5a5;
+// City-level built-up disk radius. Cluster cities now ship a builtUpR field
+// from terraform (sized by POI count); fall back to rank-based defaults for
+// any leftover legacy data.
+function effectiveBuiltUpR(city: CityData): number {
+  return city.builtUpR ?? builtUpRadius(city.rank);
+}
+
+// Country-level parks: 5-10 green polygons scattered inside each country
+// to break up the otherwise-uniform beige and match real Google Maps where
+// the city is mostly built-up with the occasional Bryant Park / Central
+// Park / Pershing Square. Sized small relative to the country and placed
+// AWAY from cluster cities so they look like genuine open space, not
+// chunks bitten out of the urban fabric.
+function countryLevelParks(
+  countryPath: [number, number][],
+  cities: CityData[],
+  countryId: string,
+): Array<[number, number][]> {
+  if (countryPath.length < 3) return [];
+  // Country bbox.
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const [x, y] of countryPath) {
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  const w = maxX - minX;
+  const h = maxY - minY;
+  const cityCenters = cities.map((c) => ({ pos: c.position, r: effectiveBuiltUpR(c) }));
+
+  // 5-10 parks scaled by country area.
+  const target = Math.min(10, Math.max(4, Math.round(Math.sqrt(w * h) / 200)));
+  let s = hashStr(countryId) ^ 0xb33fb33f;
+  const next = (): number => {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+    return s / 0xffffffff;
+  };
   const polys: Array<[number, number][]> = [];
-  for (let i = 0; i < count; i++) {
-    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
-    const angle = (s / 0xffffffff) * Math.PI * 2;
-    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
-    const dist = (s / 0xffffffff) * cityR * 0.55;
-    const px = city.position[0] + Math.cos(angle) * dist;
-    const py = city.position[1] + Math.sin(angle) * dist;
-    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
-    const r = parkBaseR * (0.75 + 0.35 * (s / 0xffffffff));
-    polys.push(builtUpPolygon([px, py], r, s));
+  let attempts = 0;
+  while (polys.length < target && attempts < target * 30) {
+    attempts++;
+    const cx = minX + next() * w;
+    const cy = minY + next() * h;
+    // Park radius: 25-55 px.
+    const r = 25 + next() * 30;
+    // Reject if it would land inside any cluster city's built-up disk
+    // (keep parks visually outside dense beige cores).
+    let tooClose = false;
+    for (const cc of cityCenters) {
+      const dx = cc.pos[0] - cx;
+      const dy = cc.pos[1] - cy;
+      if (Math.hypot(dx, dy) < cc.r + r * 0.5) {
+        tooClose = true;
+        break;
+      }
+    }
+    if (tooClose) continue;
+    polys.push(builtUpPolygon([cx, cy], r, s));
   }
   return polys;
+}
+
+// Building footprints inside a cluster city's built-up disk. Small light
+// rectangles, irregular grid — gives the beige interior the Manhattan-style
+// "thousands of buildings packed together" texture instead of reading as
+// a flat blob. Count scales with the city's built-up R.
+type BuildingRect = { x: number; y: number; w: number; h: number; rot: number };
+function buildingsForCity(city: CityData): BuildingRect[] {
+  const r = effectiveBuiltUpR(city);
+  // Roughly 1 building per 200 px² of disk area, capped 40.
+  const target = Math.min(40, Math.max(8, Math.round((Math.PI * r * r) / 600)));
+  let s = hashStr(city.id) ^ 0xc0ffee00;
+  const next = (): number => {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+    return s / 0xffffffff;
+  };
+  // Per-city rotation (orientation of the "block" — buildings line up).
+  const rot = (next() - 0.5) * (Math.PI / 6); // ±15°
+  const buildings: BuildingRect[] = [];
+  let attempts = 0;
+  while (buildings.length < target && attempts < target * 5) {
+    attempts++;
+    // Position uniformly in disk (sqrt for area uniformity).
+    const ru = Math.sqrt(next()) * r * 0.85;
+    const ang = next() * Math.PI * 2;
+    const bx = city.position[0] + Math.cos(ang) * ru;
+    const by = city.position[1] + Math.sin(ang) * ru;
+    const w = 8 + next() * 12;
+    const h = 8 + next() * 12;
+    buildings.push({ x: bx, y: by, w, h, rot });
+  }
+  return buildings;
 }
 
 export function Country({
@@ -97,26 +168,45 @@ export function Country({
       {/* Land mass — flat fill (no inner shadow). */}
       <path d={path} fill={fillColor} />
 
-      {/* Built-up areas + parks per city, both clipped to the country so they
-          never spill across borders. Built-up beige first, parks layered over. */}
+      {/* Country interior — composed bottom-to-top:
+            1. Country-level park overlays (green) — exception against the
+               otherwise-uniform beige country fill.
+            2. Cluster city built-up cores (slightly darker beige).
+            3. Building footprints inside cluster cities (Manhattan texture).
+            4. Internal street grids (CityBlocks).
+          All clipped to the country polygon. */}
       <g clipPath={`url(#${clipId})`}>
+        {/* Country-level parks */}
+        {countryLevelParks(data.polygon, cities, data.id).map((poly, i) => (
+          <path
+            key={`park-${data.id}-${i}`}
+            d={smoothClosedPath(poly)}
+            fill={ATLAS_STYLE.biome.forest}
+          />
+        ))}
+
+        {/* Cluster city built-up cores */}
         {cities.map((c) => {
-          const poly = builtUpPolygon(c.position, builtUpRadius(c.rank), hashStr(c.id));
+          const poly = builtUpPolygon(c.position, effectiveBuiltUpR(c), hashStr(c.id));
           return <path key={c.id} d={smoothClosedPath(poly)} fill={civ.blobColor} />;
         })}
+
+        {/* Building footprints */}
         {cities.flatMap((c) =>
-          parksForCity(c).map((poly, i) => (
-            <path
-              key={`park-${c.id}-${i}`}
-              d={smoothClosedPath(poly)}
-              fill={ATLAS_STYLE.biome.forest}
+          buildingsForCity(c).map((b, i) => (
+            <rect
+              key={`bldg-${c.id}-${i}`}
+              x={b.x - b.w / 2}
+              y={b.y - b.h / 2}
+              width={b.w}
+              height={b.h}
+              fill="#cdb89a"
+              transform={`rotate(${(b.rot * 180) / Math.PI} ${b.x} ${b.y})`}
             />
           )),
         )}
-      </g>
 
-      {/* Internal city street grid — visible only at street-level zoom. */}
-      <g clipPath={`url(#${clipId})`}>
+        {/* Internal city street grid — visible only at street-level zoom. */}
         <CityBlocks cities={cities} scale={scale} />
       </g>
 
