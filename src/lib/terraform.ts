@@ -1861,8 +1861,85 @@ export async function terraform(
     }
   }
 
+  // ── Build a HIERARCHICAL road network instead of dumping every edge ─────────
+  // Real urban networks (Boeing 2017, FHWA functional classification) are
+  // tree-like at the highway level with a few bypass loops, not full meshes.
+  // We previously persisted every aggregated edge (183) which produced the
+  // crisscross spaghetti the user kept seeing. New algorithm:
+  //
+  //   1. Sort all aggregated edges by weight (highest first).
+  //   2. Run Kruskal's MST: greedy pick that grows a spanning tree of the
+  //      cluster graph. Result: ~(N-1) edges, every cluster reachable, no
+  //      cycles. This is the highway TRUNK.
+  //   3. Add top 15% of non-MST edges by weight as "alpha" — bypass loops
+  //      mirroring how real metros have a few extra cross-links beyond a
+  //      strict tree.
+  //   4. Tier-assign types by MST weight rank:
+  //        top 25%  → highway (boldest)
+  //        next 50% → regular
+  //        bottom 25% + all alpha → trail (thinnest)
+  //      This gives the FHWA-style 4-tier visual hierarchy.
+  //   5. Discard the ~67% of LLM edges that are neither MST nor alpha. They
+  //      were semantic but not infrastructure-level — keeping them all was
+  //      what made the map read as a neural-net diagram, not a city.
+
+  const allEdges = Array.from(edgesByPair.values());
+  // Kruskal's: highest-weight edge first (we want strong connections in the tree).
+  allEdges.sort((a, b) => b.weight - a.weight);
+
+  const ufParent = new Map<string, string>();
+  const ufFind = (x: string): string => {
+    let p = ufParent.get(x);
+    if (p === undefined) {
+      ufParent.set(x, x);
+      return x;
+    }
+    while (p !== ufParent.get(p)) {
+      const grand = ufParent.get(ufParent.get(p)!);
+      if (grand !== undefined) ufParent.set(p, grand);
+      p = ufParent.get(p)!;
+    }
+    ufParent.set(x, p);
+    return p;
+  };
+  const ufUnion = (a: string, b: string): boolean => {
+    const ra = ufFind(a);
+    const rb = ufFind(b);
+    if (ra === rb) return false;
+    ufParent.set(ra, rb);
+    return true;
+  };
+
+  const mstEdges: EdgeAgg[] = [];
+  const nonMstEdges: EdgeAgg[] = [];
+  for (const e of allEdges) {
+    if (ufUnion(e.fromCityId, e.toCityId)) mstEdges.push(e);
+    else nonMstEdges.push(e);
+  }
+
+  // Tier assignment by MST rank.
+  const N = mstEdges.length;
+  const highwayCount = Math.max(1, Math.round(N * 0.25));
+  const regularCount = Math.max(1, Math.round(N * 0.5));
+  for (let i = 0; i < N; i++) {
+    if (i < highwayCount) mstEdges[i].type = "highway";
+    else if (i < highwayCount + regularCount) mstEdges[i].type = "regular";
+    else mstEdges[i].type = "trail";
+  }
+
+  // Alpha: top 15% non-MST edges by weight, all rendered as "trail".
+  const alphaCount = Math.max(0, Math.round(N * 0.15));
+  const alphaEdges = nonMstEdges.slice(0, alphaCount);
+  for (const e of alphaEdges) e.type = "trail";
+
+  const finalEdges = [...mstEdges, ...alphaEdges];
+
+  console.log(
+    `[terraform] road hierarchy: ${highwayCount} highway / ${regularCount} regular / ${N - highwayCount - regularCount + alphaCount} trail (out of ${allEdges.length} candidate edges; ${allEdges.length - finalEdges.length} dropped as non-infrastructure semantic links)`,
+  );
+
   const roadIds: string[] = [];
-  for (const e of edgesByPair.values()) {
+  for (const e of finalEdges) {
     const road = await prisma.road.create({
       data: {
         mapId,

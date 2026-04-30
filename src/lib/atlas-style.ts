@@ -202,12 +202,12 @@ export const ATLAS_STYLE = {
     //     count from ~230 to ~30-50 at default zoom — matches the visible
     //     street count at Manhattan zoom 14 (~30-40).
     highway: {
-      casing: { color: "#dba955", width: 4.5 } as { color: string; width: number } | undefined,
-      fill: { color: "#f0d585", width: 2.5, dash: undefined as string | undefined, opacity: 1 },
+      casing: { color: "#dba955", width: 3 } as { color: string; width: number } | undefined,
+      fill: { color: "#f0d585", width: 1.6, dash: undefined as string | undefined, opacity: 1 },
       minScale: 0,
-      maxScale: Infinity,
-      // Weight floor — render even weight=1 highways. Highways are the
-      // skeleton; you always want some visible.
+      // Hide at street zoom — when the user is examining cluster interiors,
+      // long cross-canvas highways are clutter, not orientation.
+      maxScale: 1.8,
       weightFloor: 0,
     },
     regular: {
@@ -271,7 +271,7 @@ export const ATLAS_STYLE = {
     haloColor: "#ffffff",
     haloWidth: 2.5,
     letterSpacing: 0.3,
-    minScale: 2.5,
+    minScale: 3.5,
     // Show labels only on these road types (others stay anonymous).
     showOnTypes: ["highway", "regular"] as Array<"highway" | "regular" | "trail" | "ferry">,
   },
