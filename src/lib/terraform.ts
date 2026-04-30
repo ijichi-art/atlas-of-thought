@@ -1628,12 +1628,17 @@ export async function terraform(
   // we keep the strongest type.
   const typePriority = { highway: 3, regular: 2, trail: 1, ferry: 0 } as const;
 
+  // Whitelist of valid RoadType strings — the LLM occasionally hallucinates
+  // unrelated values like "town" or "main", which would crash the persist
+  // step. Anything outside the whitelist falls back to "regular".
+  const validTypes = new Set<EdgeAgg["type"]>(["highway", "regular", "trail", "ferry"]);
   for (const e of aiResult.edges ?? []) {
     if (!Number.isInteger(e.fromCity) || !Number.isInteger(e.toCity)) continue;
     const fromId = cityIdByConvIdx.get(e.fromCity);
     const toId = cityIdByConvIdx.get(e.toCity);
     if (!fromId || !toId || fromId === toId) continue;
-    const t = (e.type ?? "regular") as EdgeAgg["type"];
+    const rawType = (e.type ?? "regular") as EdgeAgg["type"];
+    const t: EdgeAgg["type"] = validTypes.has(rawType) ? rawType : "regular";
     const k = edgeKey(fromId, toId);
     const existing = edgesByPair.get(k);
     if (!existing) {
