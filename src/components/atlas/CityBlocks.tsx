@@ -66,8 +66,11 @@ export function CityBlocks({ cities, scale }: { cities: CityData[]; scale: numbe
   const cfg = ATLAS_STYLE.cityBlocks;
   if (scale < cfg.minScale) return null;
 
-  // Towns are too small for an internal grid (single block at most).
-  const eligible = cities.filter((c) => c.rank !== "town");
+  // Render street grids for ALL cluster cities — even small ones. Skipping
+  // 'town' rank used to leave large beige holes with POIs but no streets,
+  // because terraform's cluster sizes (driven by POI count) are bigger than
+  // the legacy rank-based defaults.
+  const eligible = cities;
 
   // City grid is uniformly the collector style (white + light casing).
   // Through-streets (the two center axes that streetGrid returns as
@@ -81,7 +84,11 @@ export function CityBlocks({ cities, scale }: { cities: CityData[]; scale: numbe
     <g pointerEvents="none">
       {eligible.map((c) => {
         const seed = hashStr(c.id);
-        const baseR = builtUpRadius(c.rank);
+        // Use the city's actual built-up radius (driven by POI count) so
+        // the grid fills the entire visible cluster polygon. Falling back
+        // to rank-based radius would leave the outer ~60% of large
+        // clusters with POIs but no streets — visible bug in the screenshot.
+        const baseR = c.builtUpR ?? builtUpRadius(c.rank);
         const grid = streetGrid(c.position, baseR, seed);
         const polyForClip = builtUpPolygon(c.position, baseR, seed);
         const clipId = `city-block-clip-${c.id}`;
