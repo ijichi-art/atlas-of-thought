@@ -161,6 +161,10 @@ export function repairTruncatedJson(input: string): unknown | null {
 // reuses already-named countries instead of creating fresh ones each batch.
 type BatchContext = {
   existingCountries: Array<{ name: string; theme: string; color?: string }>;
+  // Districts already minted in earlier batches, grouped by their country.
+  // Subsequent batches are told to reuse these names whenever a sub-theme
+  // matches, otherwise create new ones — same dedup pattern as countries.
+  existingDistricts: Array<{ countryName: string; name: string }>;
   batchNumber: number; // 1-based
   totalBatches: number;
   globalConvCount: number; // total across all batches
@@ -212,6 +216,34 @@ Rules for using existing countries:
   Currently ${batchCtx.existingCountries.length} exist; prefer reusing them.`
     : "";
 
+  // District-level seed. Same idea as countries: keep the LLM from inventing
+  // a new "Auth Quarter" / "Authentication Section" name for what's already
+  // an existing "Auth" district. Without this, batches end up with hundreds
+  // of fragmented near-duplicates that don't merge cleanly.
+  const existingDistrictsBlock =
+    batchCtx && batchCtx.existingDistricts.length > 0
+      ? `
+
+EXISTING DISTRICTS (sub-themes within the countries above — REUSE these district names verbatim when a conversation's sub-theme matches):
+${(() => {
+  const grouped = new Map<string, string[]>();
+  for (const d of batchCtx.existingDistricts) {
+    const arr = grouped.get(d.countryName) ?? [];
+    arr.push(d.name);
+    grouped.set(d.countryName, arr);
+  }
+  return Array.from(grouped.entries())
+    .map(([country, names]) => `  ${country}: ${names.map((n) => `"${n}"`).join(", ")}`)
+    .join("\n");
+})()}
+
+Rules for using existing districts:
+- ALWAYS check whether a conversation fits an existing district BEFORE inventing a new one.
+- Reuse district names VERBATIM (case-sensitive). "Auth" and "Authentication" are NOT the same — use whichever matches.
+- Only create a NEW district when no existing district covers the conversation's sub-theme.
+- Aim for FEW BROAD districts (5-20 conversations each), not many tiny ones.`
+      : "";
+
   const batchHeader = batchCtx
     ? `\n(This is batch ${batchCtx.batchNumber} of ${batchCtx.totalBatches} — covering ${convs.length} conversations of ${batchCtx.globalConvCount} total. Conversations are indexed 0..${convs.length - 1} LOCAL to this batch.)\n`
     : "";
@@ -249,7 +281,7 @@ Apply this directive as follows:
     : "";
 
   const user = `Conversations (${convs.length} total). Each is identified by [N]:
-${convList}${batchHeader}${existingCountriesBlock}
+${convList}${batchHeader}${existingCountriesBlock}${existingDistrictsBlock}
 
 Build a hierarchical map of these conversations.
 
@@ -261,9 +293,10 @@ LEVEL 1 — COUNTRIES (themes):
 - Neighbors: array of 1-3 country indices (other than itself) that are most thematically related — these will be drawn adjacent on the map.
 
 LEVEL 2 — DISTRICTS (sub-themes within a country):
-- Each country has 1-4 districts.
+- Each country has 1-3 BROAD districts. Prefer fewer, larger districts.
 - Each district has a name (English + optional Japanese) and lists which conversation indices belong to it.
-- A district groups conversations sharing a finer-grained sub-theme.
+- A district groups 5-20 conversations sharing a clear sub-theme.
+- IMPORTANT: this batch will be merged with output from other batches. To avoid the same sub-theme being split into many tiny variants ("Auth", "Authentication", "Auth Quarter"), keep district names short, generic, and consistent.
 - EVERY conversation index 0..${convs.length - 1} must appear in EXACTLY ONE district across all countries combined.
 
 LEVEL 3 — CITIES (one per conversation):
@@ -404,6 +437,15 @@ export async function clusterBatched(
       const c = accCountriesByKey.get(k)!;
       return { name: c.name, theme: c.theme, color: c.color };
     });
+    // Flat list of districts already minted so the LLM can reuse names
+    // instead of inventing near-duplicates ("Auth" / "Authentication" /
+    // "Auth Quarter").
+    const existingDistricts: Array<{ countryName: string; name: string }> = [];
+    for (const country of accCountriesByKey.values()) {
+      for (const d of country.districts) {
+        existingDistricts.push({ countryName: country.name, name: d.name });
+      }
+    }
 
     const batchT0 = Date.now();
     console.log(
@@ -417,6 +459,7 @@ export async function clusterBatched(
     try {
       batchResult = await clusterWithAI(batch, ai, directive, {
         existingCountries,
+        existingDistricts,
         batchNumber: bi + 1,
         totalBatches: batches.length,
         globalConvCount: inputs.length,
@@ -552,17 +595,186 @@ export async function clusterBatched(
     }
   }
 
+  const districtCount = Array.from(accCountriesByKey.values()).reduce(
+    (s, c) => s + c.districts.length,
+    0,
+  );
   console.log(
-    `[clusterBatched] DONE — accumulated countries=${accCountriesByKey.size} cities=${accCities.length} edges=${accEdges.length} (${batches.length} batches over ${inputs.length} convs)`,
+    `[clusterBatched] DONE — accumulated countries=${accCountriesByKey.size} districts=${districtCount} cities=${accCities.length} edges=${accEdges.length} (${batches.length} batches over ${inputs.length} convs)`,
   );
 
-  return {
+  let result: AiResult = {
     countries: insertionOrder.map((k) => accCountriesByKey.get(k)!),
     cities: accCities,
     edges: accEdges,
     skipDefinitive: accSkipDefinitive.length > 0 ? accSkipDefinitive : undefined,
     skipAmbiguous: accSkipAmbiguous.length > 0 ? accSkipAmbiguous : undefined,
   };
+
+  // Post-batch consolidation: per-batch dedupe (existingDistricts seeding)
+  // catches verbatim name reuse but not near-duplicates with slightly
+  // different wording. One last LLM call sees the full district list and
+  // proposes a target-sized merge map. For 1559-conv input we want ~80-120
+  // districts (LA-metro scale).
+  const TARGET_DISTRICTS = Math.max(60, Math.min(120, Math.round(inputs.length / 15)));
+  if (districtCount > TARGET_DISTRICTS * 1.5) {
+    console.log(
+      `[clusterBatched] consolidating ${districtCount} districts → target ~${TARGET_DISTRICTS}`,
+    );
+    try {
+      result = await consolidateDistricts(result, ai, TARGET_DISTRICTS);
+      const newDistrictCount = result.countries.reduce(
+        (s, c) => s + (c.districts ?? []).length,
+        0,
+      );
+      console.log(
+        `[clusterBatched] consolidation done — districts ${districtCount} → ${newDistrictCount}`,
+      );
+    } catch (err) {
+      console.error(
+        `[clusterBatched] consolidation failed (proceeding with un-consolidated districts): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  return result;
+}
+
+// Single LLM call to merge near-duplicate districts within each country into
+// a smaller, target-count set. Keeps the country boundary inviolable — only
+// districts within the same country can be merged. The mapping the LLM
+// returns is applied by reassigning each district's cityIndexes to its
+// merged-into successor.
+async function consolidateDistricts(
+  result: AiResult,
+  ai: AiClient,
+  targetCount: number,
+): Promise<AiResult> {
+  // Build a flat numbered list with country index + district index + name +
+  // size, so the LLM can identify each one unambiguously.
+  type DistrictRef = {
+    countryIdx: number;
+    districtIdx: number;
+    name: string;
+    size: number;
+  };
+  const flat: DistrictRef[] = [];
+  for (let ci = 0; ci < result.countries.length; ci++) {
+    const districts = result.countries[ci].districts ?? [];
+    for (let di = 0; di < districts.length; di++) {
+      flat.push({
+        countryIdx: ci,
+        districtIdx: di,
+        name: districts[di].name,
+        size: (districts[di].cityIndexes ?? []).length,
+      });
+    }
+  }
+  if (flat.length <= targetCount) return result;
+
+  const countryList = result.countries
+    .map((c, i) => `${i}: ${c.name} — ${c.theme}`)
+    .join("\n");
+  const districtList = flat
+    .map(
+      (d, i) =>
+        `${i}: country=${d.countryIdx} ("${result.countries[d.countryIdx].name}") name="${d.name}" convs=${d.size}`,
+    )
+    .join("\n");
+
+  const system = `You are consolidating district names in a hierarchical "map of mind". Multiple batches independently named clusters and produced near-duplicates ("Auth", "Authentication", "Auth Quarter") that mean the same thing. Merge them. Output JSON only — no markdown or commentary.`;
+  const user = `COUNTRIES:
+${countryList}
+
+DISTRICTS (${flat.length} total — target after merge: ~${targetCount}):
+${districtList}
+
+Task: within each country, group near-duplicate districts into broader merged districts. Output a "groups" array — one entry per merged district, each entry listing the input district indices that should fold into it.
+
+Rules:
+- NEVER merge across countries. Only districts in the same country merge.
+- Keep districts genuinely distinct: only merge near-duplicates, not unrelated sub-themes.
+- Pick the most representative input name as the merged name (or coin a clearer one).
+- Aim for the target total count (~${targetCount}). It's OK to be a bit over or under.
+
+Output JSON, this exact shape:
+{
+  "groups": [
+    { "fromIndexes": [0, 1, 7], "toName": "Authentication", "toNameJa": "認証" },
+    { "fromIndexes": [2], "toName": "Storage", "toNameJa": "記憶" },
+    ...
+  ]
+}
+
+Every input district index 0..${flat.length - 1} must appear in EXACTLY ONE group.`;
+
+  let raw = "";
+  for await (const chunk of ai.stream({
+    system,
+    messages: [{ role: "user", content: user }],
+    maxTokens: 32000,
+    jsonMode: true,
+  })) {
+    raw += chunk;
+  }
+
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error(`consolidator returned no JSON. Got: ${raw.slice(0, 300)}`);
+
+  let parsed: { groups?: Array<{ fromIndexes?: number[]; toName?: string; toNameJa?: string }> };
+  try {
+    parsed = JSON.parse(jsonMatch[0]);
+  } catch {
+    const repaired = repairTruncatedJson(jsonMatch[0]);
+    if (!repaired) throw new Error("consolidator returned malformed JSON");
+    parsed = repaired as typeof parsed;
+  }
+
+  const groups = parsed.groups ?? [];
+  if (groups.length === 0) return result;
+
+  // Build new districts per country by applying groups.
+  const newCountries: AiCountry[] = result.countries.map((c) => ({
+    ...c,
+    districts: [],
+  }));
+  // Track which input districts have been processed.
+  const consumed = new Set<string>(); // key = "countryIdx:districtIdx"
+  for (const g of groups) {
+    if (!Array.isArray(g.fromIndexes) || g.fromIndexes.length === 0) continue;
+    // Map fromIndexes back to (countryIdx, districtIdx) tuples and validate
+    // they all belong to the same country.
+    const refs = g.fromIndexes
+      .filter((i): i is number => Number.isInteger(i) && i >= 0 && i < flat.length)
+      .map((i) => flat[i]);
+    if (refs.length === 0) continue;
+    const countryIdx = refs[0].countryIdx;
+    if (!refs.every((r) => r.countryIdx === countryIdx)) continue; // cross-country merges are invalid
+    // Concat cityIndexes from all source districts.
+    const mergedCityIndexes: number[] = [];
+    for (const r of refs) {
+      consumed.add(`${r.countryIdx}:${r.districtIdx}`);
+      const src = result.countries[r.countryIdx].districts?.[r.districtIdx];
+      if (src) mergedCityIndexes.push(...(src.cityIndexes ?? []));
+    }
+    newCountries[countryIdx].districts.push({
+      name: g.toName ?? refs[0].name,
+      nameJa: g.toNameJa,
+      cityIndexes: mergedCityIndexes,
+    });
+  }
+  // Any input district not covered by a group survives unchanged — the LLM
+  // sometimes drops items, but we shouldn't lose conversations.
+  for (let ci = 0; ci < result.countries.length; ci++) {
+    const districts = result.countries[ci].districts ?? [];
+    for (let di = 0; di < districts.length; di++) {
+      if (!consumed.has(`${ci}:${di}`)) {
+        newCountries[ci].districts.push({ ...districts[di] });
+      }
+    }
+  }
+
+  return { ...result, countries: newCountries };
 }
 
 // Dispatch: small input → single LLM call (faster, simpler). Large input →
@@ -1541,8 +1753,14 @@ export async function terraform(
     const cx = pois.reduce((s, p) => s + p.pos[0], 0) / pois.length;
     const cy = pois.reduce((s, p) => s + p.pos[1], 0) / pois.length;
     // Built-up radius scales with POI count (sqrt so it doesn't explode for
-    // large clusters). Min 30 px so even 1-POI cities have a visible footprint.
-    const builtUpR = Math.max(30, 18 * Math.sqrt(pois.length));
+    // large clusters). Larger floor + multiplier than v1 — the user wants
+    // cities to feel substantial and contain their POIs visibly rather
+    // than being tiny pinhead-sized disks at default zoom.
+    //   1 POI:   max(60, 32) = 60
+    //   5 POIs:  max(60, 72) = 72
+    //   20 POIs: 143
+    //   50 POIs: 226
+    const builtUpR = Math.max(60, 32 * Math.sqrt(pois.length));
 
     // Determine the cluster's "capital" POI (LLM-flagged in aiResult.cities,
     // falling back to the most-substantial conversation by message count).

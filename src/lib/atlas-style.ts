@@ -216,12 +216,15 @@ export const ATLAS_STYLE = {
 
   // ── City street blocks (internal grid, street-level zoom only) ───────────
   cityBlocks: {
-    minScale: 1.8, // hidden until the user is firmly at street level
+    // Lowered from 1.8 so the inside of cluster cities reads as populated
+    // even at the default zoom. With cities now sized larger (Phase 6
+    // built-up R bump), the grids fit visibly without crowding.
+    minScale: 1.0,
   },
 
   // ── POIs (individual conversations inside a cluster city) ────────────────
   poi: {
-    minScale: 1.8, // dots visible only at street-level zoom
+    minScale: 1.0, // visible at default zoom — they're the city's interior
     labelMinScale: 2.5, // labels need more headroom — too dense otherwise
     outerR: 3,
     fill: "#d65a4a", // --landmark-poi
