@@ -183,6 +183,15 @@ export const ATLAS_STYLE = {
     // Curve magnitude is no longer per type — Road.tsx now derives the
     // bezier control point from the segment endpoints alone, so any roads
     // sharing a trunk segment trace identical curves regardless of type.
+    //
+    // LOD strategy (matches what Google Maps does at zoom 5/8/12/15):
+    //   highway   → always visible (regional skeleton)
+    //   regular   → mid-zoom on (the "arterial network")
+    //   trail     → street-level only (the "local roads")
+    //   ferry     → mid-zoom (always salient because it's blue dashed)
+    // At default zoom 1.0 only highway + regular are drawn — keeps wide-view
+    // density comparable to Google Maps' equivalent zoom rather than
+    // showing the full tangled mesh at once.
     highway: {
       casing: { color: "#e89c30", width: 8 } as { color: string; width: number } | undefined,
       fill: { color: "#fbcd5d", width: 6, dash: undefined as string | undefined, opacity: 1 },
@@ -191,29 +200,29 @@ export const ATLAS_STYLE = {
     regular: {
       casing: { color: "#e8c878", width: 6 } as { color: string; width: number } | undefined,
       fill: { color: "#fde2a0", width: 4, dash: undefined as string | undefined, opacity: 1 },
-      minScale: 0.4,
+      minScale: 1.0,
     },
     trail: {
       casing: { color: "#d8d4ca", width: 4 } as { color: string; width: number } | undefined,
       fill: { color: "#ffffff", width: 2.5, dash: undefined as string | undefined, opacity: 1 },
-      minScale: 0.8,
+      minScale: 1.5,
     },
     ferry: {
       casing: undefined as undefined | { color: string; width: number },
       fill: { color: "#1976d2", width: 1.5, dash: "4 3" as string | undefined, opacity: 0.9 },
-      minScale: 0.7,
+      minScale: 1.0,
     },
   },
 
   // ── City street blocks (internal grid, street-level zoom only) ───────────
   cityBlocks: {
-    minScale: 1.5, // hidden until the user zooms past street level
+    minScale: 1.8, // hidden until the user is firmly at street level
   },
 
   // ── POIs (individual conversations inside a cluster city) ────────────────
   poi: {
-    minScale: 1.4, // dots visible at city-zoom
-    labelMinScale: 2.2, // labels only at street-zoom (or there'd be clutter)
+    minScale: 1.8, // dots visible only at street-level zoom
+    labelMinScale: 2.5, // labels need more headroom — too dense otherwise
     outerR: 3,
     fill: "#d65a4a", // --landmark-poi
     stroke: "#ffffff",

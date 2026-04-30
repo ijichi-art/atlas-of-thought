@@ -449,15 +449,33 @@ export async function clusterBatched(
         accCountriesByKey.set(key, existing);
         insertionOrder.push(key);
       }
-      // Append this batch's districts, remapping cityIndexes from local → global.
+      // Merge this batch's districts into the existing country, deduping
+      // by lowercased trimmed name. Without this, a district like "Auth"
+      // appearing in batch 1 and batch 5 would create TWO separate clusters
+      // — yielding 474 fragmented clusters for the 1559-conv map. Real-
+      // metro scale is ~80-120 clusters; deduping collapses fragments back
+      // to that range.
       for (const d of c.districts ?? []) {
-        existing.districts.push({
-          name: d.name,
-          nameJa: d.nameJa,
-          cityIndexes: (d.cityIndexes ?? [])
-            .filter((i): i is number => Number.isInteger(i) && i >= 0 && i < batch.length)
-            .map((i) => i + batchOffset),
-        });
+        const dKey = (d.name ?? "").toLowerCase().trim();
+        if (!dKey) continue;
+        const remappedCityIndexes = (d.cityIndexes ?? [])
+          .filter((i): i is number => Number.isInteger(i) && i >= 0 && i < batch.length)
+          .map((i) => i + batchOffset);
+        const existingDistrict = existing.districts.find(
+          (e) => (e.name ?? "").toLowerCase().trim() === dKey,
+        );
+        if (existingDistrict) {
+          existingDistrict.cityIndexes = [
+            ...existingDistrict.cityIndexes,
+            ...remappedCityIndexes,
+          ];
+        } else {
+          existing.districts.push({
+            name: d.name,
+            nameJa: d.nameJa,
+            cityIndexes: remappedCityIndexes,
+          });
+        }
       }
     }
 
@@ -800,6 +818,89 @@ function layoutAll(
       const pos = tryPlace(80, 500, 100);
       positions.set(c.convIdx, pos);
       placed.push(pos);
+    }
+  }
+
+  // ── Edge-based refinement ─────────────────────────────────────────────────
+  //
+  // The structured scatter above is purely positional (rank → radius from
+  // country center). It ignores the LLM-identified semantic edges between
+  // conversations, so deeply-related convs in different countries can end
+  // up far apart and their cluster road becomes a long cross-canvas line.
+  //
+  // Run a few hundred ticks of force-directed refinement on top of the
+  // initial scatter. Each LLM edge becomes a spring (target length 120 px)
+  // pulling its two endpoints together; the per-rank country-center pull
+  // is kept so capitals don't drift, plus a collide for separation. The
+  // result: semantically-linked clusters compress geographically, dropping
+  // the average road length significantly.
+  if ((ai.edges ?? []).length > 0) {
+    type RNode = SimulationNodeDatum & {
+      i: number;
+      countryIdx: number;
+      rank: "capital" | "city" | "town";
+    };
+    const nodes: RNode[] = [];
+    for (const [convIdx, asgn] of assignments) {
+      const p = positions.get(convIdx);
+      if (!p) continue;
+      const aiCity = ai.cities.find((c) => c.conversationIndex === convIdx);
+      nodes.push({
+        i: convIdx,
+        countryIdx: asgn.countryIdx,
+        rank: aiCity?.rank ?? "town",
+        x: p[0],
+        y: p[1],
+      });
+    }
+    const nodeByIdx = new Map<number, RNode>(nodes.map((n) => [n.i, n]));
+
+    type RLink = { source: RNode; target: RNode; strength: number };
+    const links: RLink[] = [];
+    for (const e of ai.edges ?? []) {
+      const s = nodeByIdx.get(e.fromCity);
+      const t = nodeByIdx.get(e.toCity);
+      if (!s || !t) continue;
+      // Cross-country edges pull harder — those are the long roads we
+      // need to compress. Intra-country links pull lightly so the
+      // existing rank-based structure isn't blown up.
+      const sameCountry = s.countryIdx === t.countryIdx;
+      links.push({ source: s, target: t, strength: sameCountry ? 0.04 : 0.18 });
+    }
+
+    const TARGET_LEN = 120;
+    const refineSim = forceSimulation<RNode>(nodes)
+      .force("collide", forceCollide(60))
+      .force("country", () => {
+        for (const n of nodes) {
+          const c = countryCenters[n.countryIdx];
+          if (!c) continue;
+          const dx = c[0] - (n.x ?? 0);
+          const dy = c[1] - (n.y ?? 0);
+          const k =
+            n.rank === "capital" ? 0.1 : n.rank === "city" ? 0.03 : 0.015;
+          n.x = (n.x ?? 0) + dx * k;
+          n.y = (n.y ?? 0) + dy * k;
+        }
+      })
+      .force("edges", () => {
+        for (const l of links) {
+          const dx = (l.target.x ?? 0) - (l.source.x ?? 0);
+          const dy = (l.target.y ?? 0) - (l.source.y ?? 0);
+          const d = Math.sqrt(dx * dx + dy * dy) || 1;
+          const f = (d - TARGET_LEN) * l.strength;
+          l.source.x = (l.source.x ?? 0) + (dx / d) * f * 0.5;
+          l.source.y = (l.source.y ?? 0) + (dy / d) * f * 0.5;
+          l.target.x = (l.target.x ?? 0) - (dx / d) * f * 0.5;
+          l.target.y = (l.target.y ?? 0) - (dy / d) * f * 0.5;
+        }
+      })
+      .stop();
+
+    for (let t = 0; t < 200; t++) refineSim.tick();
+
+    for (const n of nodes) {
+      positions.set(n.i, clamp(n.x ?? CX, n.y ?? CY, 60));
     }
   }
 
