@@ -2,9 +2,13 @@
 
 > **See your thinking as a city.** Import your AI chat history, get a Google-Maps-style atlas of your own ideas.
 
-<!-- Replace with a real GIF/screenshot before launch:
-     docs/assets/hero.gif (~5MB, 10–15s zoom-from-country-to-POI clip) -->
-<p align="center"><em>(hero GIF goes here — zoom from country → city → POI)</em></p>
+<p align="center">
+  <img src="docs/assets/hero.gif" alt="Atlas of Thought zooming from country to city to POI" width="800">
+</p>
+
+<p align="center">
+  📺 <a href="docs/assets/full-demo.mp4">Full demo (30 sec)</a>
+</p>
 
 [日本語版 README](./README.ja.md) · [Live demo (sample data)](#live-demo) · [Discord (coming soon)]
 

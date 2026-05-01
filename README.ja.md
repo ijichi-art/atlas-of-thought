@@ -2,7 +2,13 @@
 
 > **思考を都市として見る。** AI とのチャット履歴を読み込ませると、自分の頭の中の地形が Google Maps 風アトラスとして立ち上がる。
 
-<p align="center"><em>(ヒーロー GIF が入る — 国 → 街 → POI へのズーム動画 10〜15 秒)</em></p>
+<p align="center">
+  <img src="docs/assets/hero.gif" alt="国 → 街 → POI へのズーム" width="800">
+</p>
+
+<p align="center">
+  📺 <a href="docs/assets/full-demo.mp4">Full demo (30 sec)</a>
+</p>
 
 [English README](./README.md) · [サンプルデモ](#ライブデモ) · [Discord (準備中)]
 
