@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import type { SampleMap, CityData, CountryData, RoadData, POIData, Point } from "@/types/atlas";
+import type { SampleMap, CityData, CountryData, RoadData, POIData, RiverData, Point } from "@/types/atlas";
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
@@ -43,6 +43,13 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       },
     },
   });
+  // Authoritative POI count per city — sourced from the PlaceConversation
+  // join directly so the built-up threshold doesn't rely on the (looser)
+  // POI-list filter that drops convs missing poiX/poiY.
+  const poiCountByCity = new Map<string, number>();
+  for (const cc of cityConvs) {
+    poiCountByCity.set(cc.placeId, (poiCountByCity.get(cc.placeId) ?? 0) + 1);
+  }
   const messagesByCity = new Map<string, { role: "user" | "assistant"; text: string }[]>();
   for (const cc of cityConvs) {
     const arr = messagesByCity.get(cc.placeId) ?? [];
@@ -73,6 +80,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       districtJa: undefined,
       position: [c.positionX, c.positionY] as Point,
       builtUpR: c.builtUpR ?? undefined,
+      poiCount: poiCountByCity.get(c.id) ?? 0,
       urbanDensity: c.cityRank === "capital" ? 8 : c.cityRank === "city" ? 5 : 2,
       summary: c.summary ?? undefined,
       messages: messages.length > 0 ? messages : undefined,
@@ -115,6 +123,18 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       };
     });
 
+  const dbTerrain = await prisma.terrainFeature.findMany({
+    where: { mapId, type: "river" },
+    select: { id: true, geometry: true },
+  });
+  const rivers: RiverData[] = dbTerrain
+    .map((t) => {
+      const g = t.geometry as { kind?: string; coords?: [number, number][] } | null;
+      if (!g || g.kind !== "polyline" || !Array.isArray(g.coords)) return null;
+      return { id: t.id, path: g.coords as Point[] };
+    })
+    .filter((r): r is RiverData => r !== null);
+
   const dbRoads = await prisma.road.findMany({ where: { mapId } });
   const roads: RoadData[] = dbRoads.map((r) => ({
     id: r.id,
@@ -133,7 +153,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     sea: { color: "#a8c4d8" },
     countries,
     mountainRanges: [],
-    rivers: [],
+    rivers,
     cities,
     roads,
     pois,

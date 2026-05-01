@@ -1,3 +1,4 @@
+import { Delaunay } from "d3";
 import type { CityData } from "@/types/atlas";
 import { ATLAS_STYLE } from "@/lib/atlas-style";
 import {
@@ -62,7 +63,15 @@ function StreetSegments({
   );
 }
 
-export function CityBlocks({ cities, scale }: { cities: CityData[]; scale: number }) {
+export function CityBlocks({
+  cities,
+  allCities,
+  scale,
+}: {
+  cities: CityData[];
+  allCities: CityData[];
+  scale: number;
+}) {
   const cfg = ATLAS_STYLE.cityBlocks;
   if (scale < cfg.minScale) return null;
 
@@ -71,6 +80,18 @@ export function CityBlocks({ cities, scale }: { cities: CityData[]; scale: numbe
   // because terraform's cluster sizes (driven by POI count) are bigger than
   // the legacy rank-based defaults.
   const eligible = cities;
+
+  // Voronoi cells from every cluster center — used to bound each cluster's
+  // grid to its own territory so adjacent clusters with overlapping
+  // built-up polygons don't render two rotated grids on top of each other.
+  // Sites are deduped so the index alignment with `eligible` works via a
+  // direct lookup map. Bound box is generous (canvas + padding) so cells
+  // at the edge close cleanly.
+  const sitePoints: [number, number][] = allCities.map((c) => [c.position[0], c.position[1]]);
+  const siteIndex = new Map<string, number>();
+  allCities.forEach((c, i) => siteIndex.set(c.id, i));
+  const delaunay = Delaunay.from(sitePoints);
+  const voronoi = delaunay.voronoi([-2000, -2000, 4000, 4000]);
 
   // City grid is uniformly the collector style (white + light casing).
   // Through-streets (the two center axes that streetGrid returns as
@@ -88,10 +109,26 @@ export function CityBlocks({ cities, scale }: { cities: CityData[]; scale: numbe
         // the grid fills the entire visible cluster polygon. Falling back
         // to rank-based radius would leave the outer ~60% of large
         // clusters with POIs but no streets — visible bug in the screenshot.
-        const baseR = c.builtUpR ?? builtUpRadius(c.rank);
+        // 1.6× matches the POLY_SCALE in Country.tsx — without it the
+        // streets would stop at the edge of the (smaller) raw R disk and
+        // leave the outer urban ring without grid.
+        const baseR = (c.builtUpR ?? builtUpRadius(c.rank)) * 1.6;
         const grid = streetGrid(c.position, baseR, seed);
         const polyForClip = builtUpPolygon(c.position, baseR, seed);
         const clipId = `city-block-clip-${c.id}`;
+        const voronoiClipId = `city-block-voronoi-${c.id}`;
+        // Voronoi cell as an SVG path. cellPolygon returns null for
+        // degenerate sites (e.g. coincident centers); when that happens we
+        // fall back to no Voronoi clip so the grid still renders inside
+        // its built-up polygon.
+        const siteIdx = siteIndex.get(c.id);
+        const cellPoly =
+          siteIdx !== undefined ? voronoi.cellPolygon(siteIdx) : null;
+        const cellPathD = cellPoly
+          ? "M " +
+            cellPoly.map(([x, y]) => `${x.toFixed(1)} ${y.toFixed(1)}`).join(" L ") +
+            " Z"
+          : null;
 
         return (
           <g key={c.id}>
@@ -99,7 +136,13 @@ export function CityBlocks({ cities, scale }: { cities: CityData[]; scale: numbe
               <clipPath id={clipId}>
                 <path d={smoothClosedPath(polyForClip)} />
               </clipPath>
+              {cellPathD && (
+                <clipPath id={voronoiClipId}>
+                  <path d={cellPathD} />
+                </clipPath>
+              )}
             </defs>
+            <g clipPath={cellPathD ? `url(#${voronoiClipId})` : undefined}>
             <g clipPath={`url(#${clipId})`}>
               <StreetSegments
                 segments={grid.collectors}
@@ -115,6 +158,23 @@ export function CityBlocks({ cities, scale }: { cities: CityData[]; scale: numbe
                 casing={collectorStyle.casing}
                 keyPrefix="art"
               />
+              {/* Sub-block grid at neighbourhood zoom — bisects each
+                  collector block into quarters so dense clusters don't
+                  show 5+ POIs in a single 24×24 cell. */}
+              {scale >= 2.5 && (
+                <StreetSegments
+                  segments={grid.subCollectors}
+                  fillColor={collectorStyle.fill.color}
+                  fillWidth={collectorStyle.fill.width * 0.7}
+                  casing={
+                    collectorStyle.casing
+                      ? { color: collectorStyle.casing.color, width: collectorStyle.casing.width * 0.7 }
+                      : undefined
+                  }
+                  keyPrefix="sub"
+                />
+              )}
+            </g>
             </g>
           </g>
         );

@@ -34,10 +34,11 @@ function controlPoint(
   const nx = -dy / len;
   const ny = dx / len;
   const h = hashSegment(p1, p2);
-  // Magnitude in [0.07, 0.20] from the low bits of the hash; signed bend
-  // direction from the high bits. Variety per segment, but consistent
-  // across any road that traces it.
-  const magnitude = 0.07 + ((h & 0xff) / 0xff) * 0.13;
+  // Magnitude in [0.0, 0.04] — gentle bend, much smaller than the
+  // earlier 7-20% range that made segments look kinked. Real freeways
+  // bend gradually; minor curve here keeps the road from being a stark
+  // straight line without introducing visible angles between segments.
+  const magnitude = ((h & 0xff) / 0xff) * 0.04;
   const signed = ((((h >>> 8) & 0xffff) % 2000) / 1000) - 1;
   const offset = magnitude * len * signed;
   return [mx + nx * offset, my + ny * offset];

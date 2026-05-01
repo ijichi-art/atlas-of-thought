@@ -23,15 +23,19 @@ function smoothPath(points: [number, number][]): string {
 }
 
 export function River({ data }: { data: RiverData }) {
-  // Google-Maps-style river: flat pale blue line, no shadow / no double stroke.
+  // Major-waterway look: thick pale-blue stroke matching the sea fill so the
+  // river reads as the same body of water as the canvas backdrop. Stroke
+  // grows with zoom (no vector-effect) — wide Hudson-style band at street
+  // zoom, thin ribbon at country zoom.
   return (
     <g data-river-id={data.id} pointerEvents="none">
       <path
         d={smoothPath(data.path)}
         stroke={ATLAS_STYLE.sea.color}
-        strokeWidth={3}
+        strokeWidth={14}
         fill="none"
         strokeLinecap="round"
+        strokeLinejoin="round"
       />
     </g>
   );

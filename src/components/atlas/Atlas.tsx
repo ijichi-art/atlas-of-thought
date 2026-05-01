@@ -6,9 +6,12 @@ import { zoom, zoomIdentity, type ZoomBehavior } from "d3-zoom";
 import type { SampleMap } from "@/types/atlas";
 import { AtlasDefs, MapBackdrop } from "./AtlasDefs";
 import { Country } from "./Country";
+import { BuiltUpLayer } from "./BuiltUpLayer";
 import { River } from "./River";
 import { City } from "./City";
 import { Road } from "./Road";
+import { RoadJunctions } from "./RoadJunctions";
+import { Bridges } from "./Bridges";
 import { Legend } from "./Legend";
 import { CityDetailPanel } from "./CityDetailPanel";
 import { Districts } from "./Districts";
@@ -41,12 +44,12 @@ export function Atlas({ map }: { map: SampleMap }) {
     }
     return m;
   }, [map.cities]);
-  // Roads with shared-trunk waypoints inserted: roads heading in the same
-  // direction from a shared city merge into one trunk and fork at the end.
-  const bundledRoads = useMemo(
-    () => bundleSharedTrunks(map.roads, map.cities),
-    [map.roads, map.cities],
-  );
+  // Use the persisted roads directly. terraform.ts now emits a Euclidean
+  // MST that's planar by construction — there are no parallel paths
+  // through the same corridor, so bundleSharedTrunks would only add
+  // unnecessary waypoints that bend otherwise-straight roads.
+  const bundledRoads = useMemo(() => map.roads, [map.roads]);
+  void bundleSharedTrunks;
   const selectedCity = selectedCityId ? cityById.get(selectedCityId) ?? null : null;
   const selectedCountry = selectedCity ? countryById.get(selectedCity.countryId) ?? null : null;
 
@@ -103,6 +106,9 @@ export function Atlas({ map }: { map: SampleMap }) {
               cities={citiesByCountry.get(c.id) ?? []}
             />
           ))}
+          {/* Built-up cores hoisted above every country fill so later
+              country fills don't paint over earlier countries' Manhattan. */}
+          <BuiltUpLayer cities={map.cities} scale={scale} />
           {map.rivers.map((r) => (
             <River key={r.id} data={r} />
           ))}
@@ -110,6 +116,13 @@ export function Atlas({ map }: { map: SampleMap }) {
           {bundledRoads.map((r, i) => (
             <Road key={r.id} data={r} cityById={cityById} scale={scale} number={i + 1} />
           ))}
+          <RoadJunctions roads={bundledRoads} cities={map.cities} scale={scale} />
+          <Bridges
+            roads={bundledRoads}
+            cities={map.cities}
+            rivers={map.rivers}
+            scale={scale}
+          />
           {map.cities.map((c) => (
             <City
               key={c.id}
@@ -138,6 +151,7 @@ export function Atlas({ map }: { map: SampleMap }) {
       <div className="absolute top-3 left-3 bg-white rounded-md shadow-md px-3 py-2 text-sm text-stone-700">
         <span className="font-medium">{map.title}</span>
       </div>
+
 
       {/* Compass: hidden (decorative compass roses are forbidden in modern map style). */}
 

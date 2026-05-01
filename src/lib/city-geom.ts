@@ -74,7 +74,7 @@ export function streetGrid(
   center: Point,
   builtUpR: number,
   seed: number,
-): { arterials: Segment[]; collectors: Segment[] } {
+): { arterials: Segment[]; collectors: Segment[]; subCollectors: Segment[] } {
   let s = (seed ^ 0x5a5a5a5a) >>> 0;
   s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
   const rotation = (((s / 0xffffffff) * 30 - 15) * Math.PI) / 180;
@@ -104,10 +104,29 @@ export function streetGrid(
     collectors.push([cx + ox + sin * r, cy + oy - cos * r, cx + ox - sin * r, cy + oy + cos * r]);
   }
 
+  // Sub-collectors bisect each collector block — drawn only at high zoom
+  // (CityBlocks gates by scale). Halves a 24×24 block into 12×12 quarters,
+  // matching the "5 POIs per block" complaint at neighbourhood zoom.
+  const subCollectors: Segment[] = [];
+  for (let i = -count; i <= count; i++) {
+    const offset = (i + 0.5) * SPACING;
+    if (Math.abs(offset) > r) continue;
+    const ox = -sin * offset;
+    const oy = cos * offset;
+    subCollectors.push([cx + ox - cos * r, cy + oy - sin * r, cx + ox + cos * r, cy + oy + sin * r]);
+  }
+  for (let i = -count; i <= count; i++) {
+    const offset = (i + 0.5) * SPACING;
+    if (Math.abs(offset) > r) continue;
+    const ox = cos * offset;
+    const oy = sin * offset;
+    subCollectors.push([cx + ox + sin * r, cy + oy - cos * r, cx + ox - sin * r, cy + oy + cos * r]);
+  }
+
   const arterials: Segment[] = [
     [cx - cos * r, cy - sin * r, cx + cos * r, cy + sin * r],
     [cx + sin * r, cy - cos * r, cx - sin * r, cy + cos * r],
   ];
 
-  return { arterials, collectors };
+  return { arterials, collectors, subCollectors };
 }

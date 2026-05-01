@@ -1,12 +1,6 @@
 import type { CountryData, CityData } from "@/types/atlas";
 import { ATLAS_STYLE } from "@/lib/atlas-style";
-import {
-  builtUpPolygon,
-  builtUpRadius,
-  hashStr,
-  smoothClosedPath,
-} from "@/lib/city-geom";
-import { CityBlocks } from "./CityBlocks";
+import { builtUpPolygon, builtUpRadius, hashStr, smoothClosedPath } from "@/lib/city-geom";
 
 function polygonCentroid(points: [number, number][]): [number, number] {
   const [sx, sy] = points.reduce(([ax, ay], [x, y]) => [ax + x, ay + y], [0, 0]);
@@ -23,11 +17,10 @@ function pickBiome(name: string): "forest" | "desert" {
   return ((h >>> 0) & 1) === 0 ? "forest" : "desert";
 }
 
-// City-level built-up disk radius. Cluster cities now ship a builtUpR field
-// from terraform (sized by POI count); fall back to rank-based defaults for
-// any leftover legacy data.
+// City-level built-up disk radius. Used here only for the country-level
+// park rejection logic — actual built-up rendering moved to BuiltUpLayer.
 function effectiveBuiltUpR(city: CityData): number {
-  return city.builtUpR ?? builtUpRadius(city.rank);
+  return (city.builtUpR ?? builtUpRadius(city.rank)) * 1.6;
 }
 
 // Country-level parks: 5-10 green polygons scattered inside each country
@@ -86,39 +79,6 @@ function countryLevelParks(
   return polys;
 }
 
-// Building footprints inside a cluster city's built-up disk. Small light
-// rectangles, irregular grid — gives the beige interior the Manhattan-style
-// "thousands of buildings packed together" texture instead of reading as
-// a flat blob. Count scales with the city's built-up R.
-type BuildingRect = { x: number; y: number; w: number; h: number; rot: number };
-function buildingsForCity(city: CityData): BuildingRect[] {
-  const r = effectiveBuiltUpR(city);
-  // Doubled density — Manhattan reads as a dense field of buildings, not a
-  // few sparse rects. Capped 80 to keep render cost reasonable.
-  const target = Math.min(80, Math.max(16, Math.round((Math.PI * r * r) / 300)));
-  let s = hashStr(city.id) ^ 0xc0ffee00;
-  const next = (): number => {
-    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
-    return s / 0xffffffff;
-  };
-  // Per-city rotation (orientation of the "block" — buildings line up).
-  const rot = (next() - 0.5) * (Math.PI / 6); // ±15°
-  const buildings: BuildingRect[] = [];
-  let attempts = 0;
-  while (buildings.length < target && attempts < target * 5) {
-    attempts++;
-    // Position uniformly in disk (sqrt for area uniformity).
-    const ru = Math.sqrt(next()) * r * 0.85;
-    const ang = next() * Math.PI * 2;
-    const bx = city.position[0] + Math.cos(ang) * ru;
-    const by = city.position[1] + Math.sin(ang) * ru;
-    const w = 8 + next() * 12;
-    const h = 8 + next() * 12;
-    buildings.push({ x: bx, y: by, w, h, rot });
-  }
-  return buildings;
-}
-
 export function Country({
   data,
   scale,
@@ -129,7 +89,6 @@ export function Country({
   cities: CityData[];
 }) {
   const T = ATLAS_STYLE.country;
-  const civ = ATLAS_STYLE.civil;
   const [cx, cy] = polygonCentroid(data.polygon);
   const inv = 1 / scale;
   const path = smoothClosedPath(data.polygon);
@@ -169,15 +128,15 @@ export function Country({
       {/* Land mass — flat fill (no inner shadow). */}
       <path d={path} fill={fillColor} />
 
-      {/* Country interior — composed bottom-to-top:
-            1. Country-level park overlays (green) — exception against the
-               otherwise-uniform beige country fill.
-            2. Cluster city built-up cores (slightly darker beige).
-            3. Building footprints inside cluster cities (Manhattan texture).
-            4. Internal street grids (CityBlocks).
-          All clipped to the country polygon. */}
+      {/* Country-level parks (green) — clipped to the country polygon
+          so park blobs stay inside the country. Built-up cores, buildings,
+          and the street grid USED to live here too, but country polygons
+          on this map overlap massively (each spans the whole canvas due to
+          loose layout grouping), and a later country's opaque fill kept
+          painting over earlier countries' built-ups. Built-up rendering is
+          now hoisted to a single BuiltUpLayer rendered after ALL country
+          fills, so it's visible regardless of country draw order. */}
       <g clipPath={`url(#${clipId})`}>
-        {/* Country-level parks */}
         {countryLevelParks(data.polygon, cities, data.id).map((poly, i) => (
           <path
             key={`park-${data.id}-${i}`}
@@ -185,30 +144,6 @@ export function Country({
             fill={ATLAS_STYLE.biome.forest}
           />
         ))}
-
-        {/* Cluster city built-up cores */}
-        {cities.map((c) => {
-          const poly = builtUpPolygon(c.position, effectiveBuiltUpR(c), hashStr(c.id));
-          return <path key={c.id} d={smoothClosedPath(poly)} fill={civ.blobColor} />;
-        })}
-
-        {/* Building footprints */}
-        {cities.flatMap((c) =>
-          buildingsForCity(c).map((b, i) => (
-            <rect
-              key={`bldg-${c.id}-${i}`}
-              x={b.x - b.w / 2}
-              y={b.y - b.h / 2}
-              width={b.w}
-              height={b.h}
-              fill="#a8916e"
-              transform={`rotate(${(b.rot * 180) / Math.PI} ${b.x} ${b.y})`}
-            />
-          )),
-        )}
-
-        {/* Internal city street grid — visible only at street-level zoom. */}
-        <CityBlocks cities={cities} scale={scale} />
       </g>
 
       {/* Country border — dotted line, modern map style. */}

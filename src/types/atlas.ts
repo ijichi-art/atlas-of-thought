@@ -69,6 +69,10 @@ export type CityData = {
   position: Point;
   // Built-up radius in user-units (computed from POI count for cluster cities).
   builtUpR?: number;
+  // Authoritative POI count for this cluster — drives the built-up
+  // threshold so we don't depend on whether all POIs survived the API's
+  // poiX/poiY filter when computing density.
+  poiCount?: number;
   // 0 = no buildings, 10 = dense cluster
   urbanDensity: number;
   // Optional one-paragraph summary of what this city represents.

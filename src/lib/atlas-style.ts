@@ -201,20 +201,26 @@ export const ATLAS_STYLE = {
     //     mid-zoom band; strong edges always show. Drops visible road
     //     count from ~230 to ~30-50 at default zoom — matches the visible
     //     street count at Manhattan zoom 14 (~30-40).
+    // Roads stay visible at all zooms (Google-Maps behaviour). Earlier
+    // versions hid highways at street zoom on the theory that long cross-
+    // canvas trunks were clutter when examining cluster interiors — but the
+    // result was POIs floating in empty beige with no road context. Keep
+    // them on; rely on weight floors to suppress fragments instead.
     highway: {
-      casing: { color: "#dba955", width: 3 } as { color: string; width: number } | undefined,
-      fill: { color: "#f0d585", width: 1.6, dash: undefined as string | undefined, opacity: 1 },
+      // Apple Maps freeway palette — muted slate blue. Slightly thicker
+      // than the previous yellow trunk so it still reads as the dominant
+      // tier next to the new fatter regulars.
+      casing: { color: "#6f8294", width: 4 } as { color: string; width: number } | undefined,
+      fill: { color: "#8a9eb5", width: 2.2, dash: undefined as string | undefined, opacity: 1 },
       minScale: 0,
-      // Hide at street zoom — when the user is examining cluster interiors,
-      // long cross-canvas highways are clutter, not orientation.
-      maxScale: 1.8,
+      maxScale: 100,
       weightFloor: 0,
     },
     regular: {
       casing: { color: "#e0cf9c", width: 2.4 } as { color: string; width: number } | undefined,
       fill: { color: "#f5e7b8", width: 1.2, dash: undefined as string | undefined, opacity: 1 },
       minScale: 0,
-      maxScale: 2.0,
+      maxScale: 100,
       // Hide weight=1 regular roads everywhere — they're the noisy fragments.
       weightFloor: 2,
     },
@@ -222,14 +228,14 @@ export const ATLAS_STYLE = {
       casing: { color: "#d8d4ca", width: 1.5 } as { color: string; width: number } | undefined,
       fill: { color: "#ffffff", width: 0.8, dash: undefined as string | undefined, opacity: 0.9 },
       minScale: 0.7,
-      maxScale: 1.8,
+      maxScale: 100,
       weightFloor: 2,
     },
     ferry: {
       casing: undefined as undefined | { color: string; width: number },
       fill: { color: "#1976d2", width: 1.0, dash: "4 3" as string | undefined, opacity: 0.85 },
       minScale: 0.6,
-      maxScale: 2.0,
+      maxScale: 100,
       weightFloor: 0,
     },
   },

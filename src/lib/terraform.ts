@@ -13,6 +13,7 @@
 
 import { prisma } from "@/lib/prisma";
 import type { AiClient } from "./ai-client";
+import { Delaunay } from "d3";
 import { polygonHull } from "d3-polygon";
 import {
   forceSimulation,
@@ -1107,6 +1108,63 @@ function layoutAll(
   return { positions, countryCenters: finalCenters };
 }
 
+// ── River generation ─────────────────────────────────────────────────────────
+//
+// One major meandering river per map. Real cities almost universally have a
+// dominant water feature (Hudson, Thames, Sumida, Han) that cuts through and
+// shapes the road network. The river is rendered behind roads — bridges
+// (small white perpendicular ticks at road×river crossings) come later.
+//
+// Algorithm: pick an entry point on one canvas edge and an exit on the
+// opposite edge. Walk a straight line between them with N intermediate
+// waypoints, perturbing each waypoint perpendicular to the entry→exit axis
+// using a low-frequency sinusoid plus per-vertex jitter. Result is a single
+// gentle S-curve — not a uniform sine wave (looks fake), not random noise
+// (looks like a stream, not a river).
+
+function generateRiver(seed: number, w: number, h: number): [number, number][] {
+  const rng = mulberry32(seed);
+  // Choose an axis: horizontal (entry on left/right edge) or vertical
+  // (entry on top/bottom edge). 50/50.
+  const horizontal = rng() < 0.5;
+  // Entry/exit Y (or X) jittered around mid-axis so the river isn't always
+  // dead-centre.
+  const cross = (axisLen: number): number => axisLen * (0.25 + rng() * 0.5);
+  const entry: [number, number] = horizontal ? [0, cross(h)] : [cross(w), 0];
+  const exit: [number, number] = horizontal ? [w, cross(h)] : [cross(w), h];
+
+  const dx = exit[0] - entry[0];
+  const dy = exit[1] - entry[1];
+  const len = Math.hypot(dx, dy);
+  // Unit perpendicular (left of travel direction).
+  const px = -dy / len;
+  const py = dx / len;
+
+  // 9 interior waypoints (11 total). Even spacing along the entry→exit line.
+  const N = 9;
+  // Phase + amplitude of the meander. One full S (period covers ~the whole
+  // canvas) plus a faster ripple at half amplitude.
+  const phase = rng() * Math.PI * 2;
+  const amp1 = 80 + rng() * 60; // primary meander amplitude
+  const amp2 = 25 + rng() * 25; // secondary ripple
+
+  const points: [number, number][] = [entry];
+  for (let i = 1; i <= N; i++) {
+    const t = i / (N + 1); // 0..1 along the line
+    const baseX = entry[0] + dx * t;
+    const baseY = entry[1] + dy * t;
+    // Falls off at the endpoints so river enters/exits cleanly along the edge.
+    const taper = Math.sin(Math.PI * t);
+    const offset =
+      taper *
+      (amp1 * Math.sin(phase + t * Math.PI * 1.6) +
+        amp2 * Math.sin(phase * 1.3 + t * Math.PI * 4.2));
+    points.push([baseX + px * offset, baseY + py * offset]);
+  }
+  points.push(exit);
+  return points.map(([x, y]) => [Math.round(x), Math.round(y)]);
+}
+
 // ── Country polygons (organic) ────────────────────────────────────────────────
 
 function organicBlob(
@@ -1640,11 +1698,59 @@ export async function terraform(
   void countryCenters; // not stored on Country yet — used internally for layout
 
   // Wipe existing geography. Roads first (FK to Place), then Places, then
-  // we'll let cascades clean PlaceConversation rows.
+  // we'll let cascades clean PlaceConversation rows. Terrain (rivers etc.)
+  // is regenerated each terraform — drop the prior rows here.
   await prisma.$transaction([
     prisma.road.deleteMany({ where: { mapId } }),
     prisma.place.deleteMany({ where: { mapId } }),
+    prisma.terrainFeature.deleteMany({ where: { mapId } }),
   ]);
+
+  // ── River first ───────────────────────────────────────────────────────────
+  // Generate and persist the major river BEFORE scattering POIs so the POI
+  // scatter loop can reject positions that would land on the water. River
+  // is seeded by mapId so the same map keeps the same river shape across
+  // re-terraforms (clusters re-arrange, but the waterway stays put).
+  const riverPath = generateRiver(deterministicSeed([mapId, "river"]), VIEW_W, VIEW_H);
+  await prisma.terrainFeature.create({
+    data: {
+      mapId,
+      type: "river",
+      geometry: { kind: "polyline", coords: riverPath },
+    },
+  });
+  // Pre-build segment list + a distance test for POI rejection sampling.
+  // RIVER_BUFFER matches the river's visual half-width (~7) plus a small
+  // pad so POI dots don't touch the waterway edge.
+  const RIVER_BUFFER = 10;
+  const riverSegments: Array<[number, number, number, number]> = [];
+  for (let i = 0; i < riverPath.length - 1; i++) {
+    const [ax, ay] = riverPath[i];
+    const [bx, by] = riverPath[i + 1];
+    riverSegments.push([ax, ay, bx, by]);
+  }
+  const distPointToSegment = (
+    px: number,
+    py: number,
+    ax: number,
+    ay: number,
+    bx: number,
+    by: number,
+  ): number => {
+    const dx = bx - ax;
+    const dy = by - ay;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq < 1e-9) return Math.hypot(px - ax, py - ay);
+    let t = ((px - ax) * dx + (py - ay) * dy) / lenSq;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+  };
+  const isOnRiver = (px: number, py: number): boolean => {
+    for (const [ax, ay, bx, by] of riverSegments) {
+      if (distPointToSegment(px, py, ax, ay, bx, by) < RIVER_BUFFER) return true;
+    }
+    return false;
+  };
 
   // Phase 1 keeps the existing "1 conv = 1 city" model — we just persist
   // every level=country and level=city node as a Place row. Phase 2 will
@@ -1701,6 +1807,8 @@ export async function terraform(
   // Track each city's POI conv positions so we can compute its centroid /
   // built-up radius.
   const poisByDistrict = new Map<string, Array<{ convIdx: number; pos: [number, number] }>>();
+  // Cluster centroid by cityId — needed for FDEB bundling at the road stage.
+  const cityPosById = new Map<string, [number, number]>();
 
   for (const [convIdx, asgn] of assignments) {
     const pos = positions.get(convIdx);
@@ -1723,15 +1831,19 @@ export async function terraform(
     // Centroid of POI positions = city anchor.
     const cx = pois.reduce((s, p) => s + p.pos[0], 0) / pois.length;
     const cy = pois.reduce((s, p) => s + p.pos[1], 0) / pois.length;
-    // Built-up radius scales with POI count (sqrt so it doesn't explode for
-    // large clusters). Larger floor + multiplier than v1 — the user wants
-    // cities to feel substantial and contain their POIs visibly rather
-    // than being tiny pinhead-sized disks at default zoom.
-    //   1 POI:   max(60, 32) = 60
-    //   5 POIs:  max(60, 72) = 72
-    //   20 POIs: 143
-    //   50 POIs: 226
-    const builtUpR = Math.max(60, 32 * Math.sqrt(pois.length));
+    // Built-up radius scales with POI count, capped to keep large clusters
+    // (100+ POIs) from spanning a third of the canvas. Earlier coefficient
+    // 32 produced R≈418 for the biggest cluster, with R≈300 commonly —
+    // adjacent polygons overlapped, POIs spilled into each other's country
+    // fill, and density inside the cluster fell BELOW the surrounding
+    // mixed-cluster soup. Tighter scaling + 150 cap → genuine Manhattan
+    // density per cluster.
+    //   1 POI:   max(60, 10) = 60
+    //   5 POIs:  max(60, 22) = 60
+    //   20 POIs: 60 → 60 (still clamped)
+    //   50 POIs: 71
+    //   171 POIs: clamp at 150
+    const builtUpR = Math.min(150, Math.max(60, 10 * Math.sqrt(pois.length)));
 
     // Determine the cluster's "capital" POI (LLM-flagged in aiResult.cities,
     // falling back to the most-substantial conversation by message count).
@@ -1759,6 +1871,7 @@ export async function terraform(
       select: { id: true },
     });
     cityIdByDistrict.set(key, city.id);
+    cityPosById.set(city.id, [cx, cy]);
 
     // Phase 3: scatter POIs uniformly inside the city's built-up disk
     // (radius = builtUpR * 0.85 so they stay clear of the city outline).
@@ -1785,12 +1898,24 @@ export async function terraform(
 
     for (const poi of pois) {
       const conv = inputs[poi.convIdx];
-      // sqrt for uniform area distribution in a disk; 0.05 inner padding
-      // so POIs aren't all stacked at the centroid for very small clusters.
-      const r = (Math.sqrt(0.05 + 0.95 * next())) * builtUpR * 0.85;
-      const ang = next() * Math.PI * 2;
-      const px = cx + Math.cos(ang) * r;
-      const py = cy + Math.sin(ang) * r;
+      // Linear (not sqrt) — center-biased 1/r density. Range 0.6R so the
+      // POI sits inside the polygon's narrowest direction (which dips to
+      // 0.65R in builtUpPolygon's organic blob). Combined with the R cap
+      // above, this makes the inside of every cluster genuinely denser
+      // than the surrounding country fill.
+      // Rejection sampling against the river polyline keeps POI dots off
+      // the water. Up to 20 attempts; if every attempt lands on-river
+      // (cluster center too close), accept the last position rather than
+      // loop forever.
+      let px = cx;
+      let py = cy;
+      for (let attempt = 0; attempt < 20; attempt++) {
+        const r = (0.05 + 0.95 * next()) * builtUpR * 0.6;
+        const ang = next() * Math.PI * 2;
+        px = cx + Math.cos(ang) * r;
+        py = cy + Math.sin(ang) * r;
+        if (!isOnRiver(px, py)) break;
+      }
       const aiCity = aiResult.cities.find((c) => c.conversationIndex === poi.convIdx);
       const rawKind = aiCity?.kind as AiCityKind | undefined;
       const kind: AiCityKind | null =
@@ -1861,31 +1986,61 @@ export async function terraform(
     }
   }
 
-  // ── Build a HIERARCHICAL road network instead of dumping every edge ─────────
-  // Real urban networks (Boeing 2017, FHWA functional classification) are
-  // tree-like at the highway level with a few bypass loops, not full meshes.
-  // We previously persisted every aggregated edge (183) which produced the
-  // crisscross spaghetti the user kept seeing. New algorithm:
-  //
-  //   1. Sort all aggregated edges by weight (highest first).
-  //   2. Run Kruskal's MST: greedy pick that grows a spanning tree of the
-  //      cluster graph. Result: ~(N-1) edges, every cluster reachable, no
-  //      cycles. This is the highway TRUNK.
-  //   3. Add top 15% of non-MST edges by weight as "alpha" — bypass loops
-  //      mirroring how real metros have a few extra cross-links beyond a
-  //      strict tree.
-  //   4. Tier-assign types by MST weight rank:
-  //        top 25%  → highway (boldest)
-  //        next 50% → regular
-  //        bottom 25% + all alpha → trail (thinnest)
-  //      This gives the FHWA-style 4-tier visual hierarchy.
-  //   5. Discard the ~67% of LLM edges that are neither MST nor alpha. They
-  //      were semantic but not infrastructure-level — keeping them all was
-  //      what made the map read as a neural-net diagram, not a city.
+  // ── Euclidean MST road network ───────────────────────────────────────────
+  // Spanning tree built from the Delaunay triangulation of cluster centers.
+  // Sorted by Euclidean distance (Kruskal). Three guarantees:
+  //   1. Planar by construction — Euclidean MST is a subset of the Delaunay
+  //      triangulation, so highways NEVER cross. The earlier LLM-weight MST
+  //      could connect semantically-related but geographically-distant
+  //      clusters, producing the tangled criss-cross the user repeatedly
+  //      flagged.
+  //   2. Minimum edges — N-1 edges connect all N clusters via highway-only
+  //      paths. No alpha bypass; no LLM edges dropped onto the network.
+  //   3. Natural angles — adjacent edges meet at angles bounded by the
+  //      Delaunay structure, so no sharp folds at cluster junctions.
+  // The LLM's `aiResult.edges` is no longer used for road generation; the
+  // semantic info is preserved in cluster groupings (countries / districts).
 
-  const allEdges = Array.from(edgesByPair.values());
-  // Kruskal's: highest-weight edge first (we want strong connections in the tree).
-  allEdges.sort((a, b) => b.weight - a.weight);
+  // Build Delaunay triangulation from cluster centroids.
+  void edgesByPair; // kept for compatibility but no longer drives roads
+  const clusterIds: string[] = [];
+  const clusterPoints: [number, number][] = [];
+  for (const id of cityIdByDistrict.values()) {
+    const pos = cityPosById.get(id);
+    if (!pos) continue;
+    clusterIds.push(id);
+    clusterPoints.push(pos);
+  }
+  const candidateEdges: EdgeAgg[] = [];
+  if (clusterPoints.length >= 2) {
+    const delaunay = Delaunay.from(clusterPoints);
+    const seenPair = new Set<string>();
+    for (let t = 0; t < delaunay.triangles.length; t += 3) {
+      const ia = delaunay.triangles[t];
+      const ib = delaunay.triangles[t + 1];
+      const ic = delaunay.triangles[t + 2];
+      for (const [i, j] of [[ia, ib], [ib, ic], [ia, ic]] as Array<[number, number]>) {
+        const fromId = clusterIds[i];
+        const toId = clusterIds[j];
+        const k = edgeKey(fromId, toId);
+        if (seenPair.has(k)) continue;
+        seenPair.add(k);
+        const dist = Math.hypot(
+          clusterPoints[i][0] - clusterPoints[j][0],
+          clusterPoints[i][1] - clusterPoints[j][1],
+        );
+        candidateEdges.push({
+          fromCityId: fromId,
+          toCityId: toId,
+          type: "highway",
+          weight: dist,
+          label: null,
+        });
+      }
+    }
+  }
+  // Sort ASCENDING by Euclidean distance (Kruskal picks shortest first).
+  candidateEdges.sort((a, b) => a.weight - b.weight);
 
   const ufParent = new Map<string, string>();
   const ufFind = (x: string): string => {
@@ -1911,86 +2066,58 @@ export async function terraform(
   };
 
   const mstEdges: EdgeAgg[] = [];
-  const nonMstEdges: EdgeAgg[] = [];
-  for (const e of allEdges) {
+  for (const e of candidateEdges) {
     if (ufUnion(e.fromCityId, e.toCityId)) mstEdges.push(e);
-    else nonMstEdges.push(e);
   }
+  for (const e of mstEdges) e.type = "highway";
 
-  // ── Orphan resolution ─────────────────────────────────────────────────────
-  // MST gives every cluster reachability but ~half become degree-1 leaves
-  // (dead-ends). Real cities have NO dead-end neighbourhoods at the
-  // arterial level — every district has 2+ connections so traffic can
-  // flow through. Augment by adding the highest-weight non-MST edge that
-  // touches each leaf cluster.
-  const degree = new Map<string, number>();
-  const bumpDeg = (id: string, delta: number) =>
-    degree.set(id, (degree.get(id) ?? 0) + delta);
+  // ── Detour-shortcut bypass edges ─────────────────────────────────────────
+  // Add up to BYPASS_COUNT Delaunay-adjacent non-MST edges whose MST detour
+  // ratio is highest — pairs that are close geographically but force a long
+  // path through the spanning tree. Keeps planarity (Delaunay-only) and the
+  // user's "highway count ≈ N" minimalism.
+  const BYPASS_COUNT = 5;
+  const mstAdj = new Map<string, Array<{ to: string; dist: number }>>();
+  const pushAdj = (a: string, b: string, d: number) => {
+    const arr = mstAdj.get(a) ?? [];
+    arr.push({ to: b, dist: d });
+    mstAdj.set(a, arr);
+  };
   for (const e of mstEdges) {
-    bumpDeg(e.fromCityId, 1);
-    bumpDeg(e.toCityId, 1);
+    pushAdj(e.fromCityId, e.toCityId, e.weight);
+    pushAdj(e.toCityId, e.fromCityId, e.weight);
   }
-  const usedAlpha = new Set<EdgeAgg>();
-  // Sweep orphans (degree 1) in decreasing weight order so the strongest
-  // edges are chosen first.
-  const orphans = Array.from(degree.entries())
-    .filter(([, d]) => d === 1)
-    .map(([id]) => id);
-  for (const orphan of orphans) {
-    if ((degree.get(orphan) ?? 0) >= 2) continue; // already fixed by an earlier sweep
-    const candidate = nonMstEdges.find(
-      (e) =>
-        !usedAlpha.has(e) &&
-        (e.fromCityId === orphan || e.toCityId === orphan),
-    );
-    if (candidate) {
-      usedAlpha.add(candidate);
-      bumpDeg(candidate.fromCityId, 1);
-      bumpDeg(candidate.toCityId, 1);
+  const mstPathDist = (from: string, to: string): number => {
+    const visited = new Set<string>([from]);
+    const queue: Array<{ id: string; d: number }> = [{ id: from, d: 0 }];
+    while (queue.length > 0) {
+      const cur = queue.shift()!;
+      if (cur.id === to) return cur.d;
+      for (const nb of mstAdj.get(cur.id) ?? []) {
+        if (visited.has(nb.to)) continue;
+        visited.add(nb.to);
+        queue.push({ id: nb.to, d: cur.d + nb.dist });
+      }
     }
-  }
+    return Infinity;
+  };
+  const mstSet = new Set(mstEdges.map((e) => edgeKey(e.fromCityId, e.toCityId)));
+  const scored = candidateEdges
+    .filter((e) => !mstSet.has(edgeKey(e.fromCityId, e.toCityId)))
+    .map((e) => ({ edge: e, ratio: mstPathDist(e.fromCityId, e.toCityId) / e.weight }))
+    .sort((a, b) => b.ratio - a.ratio);
+  const bypass = scored.slice(0, BYPASS_COUNT).map((s) => ({ ...s.edge, type: "highway" as const }));
+  mstEdges.push(...bypass);
 
-  // ── Top-up alpha to ~15% of MST size for bypass redundancy ─────────────────
-  const N = mstEdges.length;
-  const targetAlpha = Math.max(0, Math.round(N * 0.15));
-  for (const e of nonMstEdges) {
-    if (usedAlpha.size >= targetAlpha) break;
-    if (usedAlpha.has(e)) continue;
-    usedAlpha.add(e);
-  }
-  const alphaEdges = Array.from(usedAlpha);
-
-  // ── Tier assignment per FHWA functional classification ratio 1 : 2 : 4 ────
-  // Highways form the regional skeleton (bold), arterials carry medium
-  // traffic, trails handle the bulk (per-cluster collectors + bypass alpha).
-  const highwayCount = Math.max(1, Math.round(N * 0.17));
-  const regularCount = Math.max(1, Math.round(N * 0.33));
-  for (let i = 0; i < N; i++) {
-    if (i < highwayCount) mstEdges[i].type = "highway";
-    else if (i < highwayCount + regularCount) mstEdges[i].type = "regular";
-    else mstEdges[i].type = "trail";
-  }
-  for (const e of alphaEdges) e.type = "trail";
-
-  const finalEdges = [...mstEdges, ...alphaEdges];
-
-  // Diagnostics: degree distribution + tier counts.
-  let degSum = 0;
-  let degMin = Infinity;
-  let degMax = 0;
-  let leafCount = 0;
-  for (const d of degree.values()) {
-    degSum += d;
-    degMin = Math.min(degMin, d);
-    degMax = Math.max(degMax, d);
-    if (d <= 1) leafCount++;
-  }
-  const avgDeg = degree.size > 0 ? degSum / degree.size : 0;
-  const trailCount = N - highwayCount - regularCount + alphaEdges.length;
+  const finalEdges = mstEdges;
+  const highwayCount = mstEdges.length;
   console.log(
-    `[terraform] road hierarchy: highway=${highwayCount} regular=${regularCount} trail=${trailCount} (MST=${N} + alpha=${alphaEdges.length}, dropped ${allEdges.length - finalEdges.length} non-infra edges) | cluster degree avg=${avgDeg.toFixed(2)} min=${degMin === Infinity ? 0 : degMin} max=${degMax} leaves=${leafCount}/${degree.size}`,
+    `[terraform] Euclidean MST + bypass: highway=${highwayCount} (MST=${highwayCount - bypass.length} + bypass=${bypass.length}, Delaunay candidates=${candidateEdges.length}, ${clusterIds.length} clusters)`,
   );
 
+  // Persist Euclidean MST as straight-line roads (no waypoints, no FDEB).
+  // The MST is planar by construction, so there's nothing to bundle and any
+  // intermediate waypoints would only introduce visible angles.
   const roadIds: string[] = [];
   for (const e of finalEdges) {
     const road = await prisma.road.create({
@@ -2000,7 +2127,8 @@ export async function terraform(
         toId: e.toCityId,
         type: e.type,
         label: e.label,
-        weight: e.weight,
+        weight: 1,
+        waypoints: undefined,
       },
       select: { id: true },
     });
