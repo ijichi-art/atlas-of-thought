@@ -17,6 +17,7 @@ import { CityDetailPanel } from "./CityDetailPanel";
 import { Districts } from "./Districts";
 import { POILayer } from "./POILayer";
 import { SearchBox, type SearchTarget } from "./SearchBox";
+import { SearchPin } from "./SearchPin";
 import { ATLAS_STYLE } from "@/lib/atlas-style";
 import { bundleSharedTrunks } from "@/lib/bundle-trunks";
 
@@ -30,6 +31,9 @@ export function Atlas({ map }: { map: SampleMap }) {
   const [scale, setScale] = useState(1);
   const [selectedCityId, setSelectedCityId] = useState<string | null>(null);
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
+  // Drop-pin shown at the target of a search selection. Cleared when the
+  // user clicks empty map area or picks a new search result.
+  const [searchPin, setSearchPin] = useState<{ x: number; y: number } | null>(null);
   const pois = useMemo(() => map.pois ?? [], [map.pois]);
   const cityById = useMemo(() => new Map(map.cities.map((c) => [c.id, c])), [map.cities]);
   const countryById = useMemo(
@@ -101,6 +105,10 @@ export function Atlas({ map }: { map: SampleMap }) {
       .duration(600)
       .call(behavior.transform, zoomIdentity.translate(tx, ty).scale(k));
 
+    // Drop a Google-Maps-style red pin at the target so the user can see
+    // exactly where they landed even if the area is dense.
+    setSearchPin({ x: cx, y: cy });
+
     // Side-effects: highlight the target so the user sees what they
     // landed on. POIs select both POI + parent city so the detail panel
     // shows context.
@@ -131,6 +139,7 @@ export function Atlas({ map }: { map: SampleMap }) {
         onClick={() => {
           setSelectedCityId(null);
           setSelectedConvId(null);
+          setSearchPin(null);
         }}
       >
         <AtlasDefs />
@@ -182,6 +191,14 @@ export function Atlas({ map }: { map: SampleMap }) {
             }}
           />
           <Districts cities={map.cities} scale={scale} />
+          {searchPin && (
+            <SearchPin
+              x={searchPin.x}
+              y={searchPin.y}
+              scale={scale}
+              onDismiss={() => setSearchPin(null)}
+            />
+          )}
         </g>
       </svg>
 
