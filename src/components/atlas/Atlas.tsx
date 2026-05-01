@@ -34,6 +34,42 @@ export function Atlas({ map }: { map: SampleMap }) {
   // Drop-pin shown at the target of a search selection. Cleared when the
   // user clicks empty map area or picks a new search result.
   const [searchPin, setSearchPin] = useState<{ x: number; y: number } | null>(null);
+  // Loaded conversation for whichever POI the user just clicked. The
+  // initial map payload only ships ~6 sample messages per city, so we
+  // fetch the actual conversation lazily when a POI is selected.
+  const [selectedConv, setSelectedConv] = useState<{
+    id: string;
+    title: string | null;
+    messages: { role: "user" | "assistant"; text: string }[];
+  } | null>(null);
+
+  useEffect(() => {
+    if (!selectedConvId) {
+      setSelectedConv(null);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/conversations/${selectedConvId}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        const messages = (
+          data.messages as { role: string; text: string }[]
+        )
+          .filter((m) => m.role === "user" || m.role === "assistant")
+          .map((m) => ({
+            role: m.role as "user" | "assistant",
+            text: m.text,
+          }));
+        setSelectedConv({ id: data.id, title: data.title, messages });
+      })
+      .catch(() => {
+        // Network glitches just leave the panel showing the city overview.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedConvId]);
   const pois = useMemo(() => map.pois ?? [], [map.pois]);
   const cityById = useMemo(() => new Map(map.cities.map((c) => [c.id, c])), [map.cities]);
   const countryById = useMemo(
@@ -247,9 +283,13 @@ export function Atlas({ map }: { map: SampleMap }) {
       <CityDetailPanel
         city={selectedCity}
         country={selectedCountry}
-        onClose={() => setSelectedCityId(null)}
+        onClose={() => {
+          setSelectedCityId(null);
+          setSelectedConvId(null);
+        }}
         allCities={map.cities}
         countryById={countryById}
+        selectedConv={selectedConv}
       />
     </div>
   );

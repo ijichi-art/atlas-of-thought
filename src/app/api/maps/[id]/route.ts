@@ -28,35 +28,58 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const cityPlaces = places.filter((p) => p.level === "city");
   const countryPlaces = places.filter((p) => p.level === "country");
 
-  // Pull conversation message previews for each city (POI side panel data).
-  const cityConvs = await prisma.placeConversation.findMany({
+  // Pull message previews for each city. The naive nested include
+  //   placeConversation.findMany({ include: { conversation: { include: { messages: ... } } } })
+  // generates a compound SELECT that exceeds SQLite's default 500-branch
+  // UNION ALL limit on maps with ~1500+ conversations (Prisma error
+  // P2029). Split into three flat queries instead and assemble in JS.
+  const placeConvLinks = await prisma.placeConversation.findMany({
     where: { place: { mapId, level: "city" } },
-    include: {
-      conversation: {
-        include: {
-          messages: {
-            orderBy: { ordinal: "asc" },
-            take: 6,
-            select: { role: true, text: true },
-          },
-        },
-      },
-    },
+    select: { placeId: true, conversationId: true },
   });
-  // Authoritative POI count per city — sourced from the PlaceConversation
-  // join directly so the built-up threshold doesn't rely on the (looser)
-  // POI-list filter that drops convs missing poiX/poiY.
+  // Authoritative POI count per city — sourced from the join directly.
   const poiCountByCity = new Map<string, number>();
-  for (const cc of cityConvs) {
+  for (const cc of placeConvLinks) {
     poiCountByCity.set(cc.placeId, (poiCountByCity.get(cc.placeId) ?? 0) + 1);
   }
-  const messagesByCity = new Map<string, { role: "user" | "assistant"; text: string }[]>();
-  for (const cc of cityConvs) {
-    const arr = messagesByCity.get(cc.placeId) ?? [];
-    for (const m of cc.conversation.messages) {
-      arr.push({ role: m.role as "user" | "assistant", text: m.text });
+  // For the side-panel preview we only need a few messages per city, not
+  // the full transcript. To stay light: pick at most one conversation's
+  // worth (6 messages) per city.
+  const sampleConvIdByCity = new Map<string, string>();
+  for (const cc of placeConvLinks) {
+    if (!sampleConvIdByCity.has(cc.placeId)) {
+      sampleConvIdByCity.set(cc.placeId, cc.conversationId);
     }
-    messagesByCity.set(cc.placeId, arr);
+  }
+  const sampleConvIds = Array.from(sampleConvIdByCity.values());
+  // Chunk the IN-list to stay safely under SQLite limits.
+  const CHUNK = 200;
+  const messagesByConv = new Map<
+    string,
+    { role: "user" | "assistant"; text: string }[]
+  >();
+  for (let i = 0; i < sampleConvIds.length; i += CHUNK) {
+    const slice = sampleConvIds.slice(i, i + CHUNK);
+    const msgs = await prisma.message.findMany({
+      where: { conversationId: { in: slice } },
+      orderBy: { ordinal: "asc" },
+      select: { conversationId: true, role: true, text: true },
+    });
+    for (const m of msgs) {
+      const arr = messagesByConv.get(m.conversationId) ?? [];
+      if (arr.length < 6) {
+        arr.push({ role: m.role as "user" | "assistant", text: m.text });
+        messagesByConv.set(m.conversationId, arr);
+      }
+    }
+  }
+  const messagesByCity = new Map<
+    string,
+    { role: "user" | "assistant"; text: string }[]
+  >();
+  for (const [cityId, convId] of sampleConvIdByCity) {
+    const arr = messagesByConv.get(convId);
+    if (arr && arr.length > 0) messagesByCity.set(cityId, arr);
   }
 
   const countries: CountryData[] = countryPlaces.map((c) => ({
@@ -87,24 +110,33 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     };
   });
 
-  // POIs (individual conversations) — one per Conversation that has a place
-  // assigned, with the position scattered inside its city's built-up disk
-  // by Phase 3.
-  const poiRows = await prisma.conversation.findMany({
-    where: { mapId, places: { some: { place: { mapId, level: "city" } } }, poiX: { not: null } },
-    select: {
-      id: true,
-      title: true,
-      poiX: true,
-      poiY: true,
-      poiKind: true,
-      places: {
-        where: { place: { level: "city" } },
-        select: { placeId: true },
-        take: 1,
-      },
-    },
-  });
+  // POIs (individual conversations) — split into two flat queries for the
+  // same SQLite-limit reason as above.
+  const convToCity = new Map<string, string>();
+  for (const cc of placeConvLinks) {
+    if (!convToCity.has(cc.conversationId)) convToCity.set(cc.conversationId, cc.placeId);
+  }
+  const convIdsWithCity = Array.from(convToCity.keys());
+  type PoiRow = {
+    id: string;
+    title: string | null;
+    poiX: number | null;
+    poiY: number | null;
+    poiKind: string | null;
+  };
+  const poiRowsRaw: PoiRow[] = [];
+  for (let i = 0; i < convIdsWithCity.length; i += CHUNK) {
+    const slice = convIdsWithCity.slice(i, i + CHUNK);
+    const rows = await prisma.conversation.findMany({
+      where: { mapId, id: { in: slice }, poiX: { not: null } },
+      select: { id: true, title: true, poiX: true, poiY: true, poiKind: true },
+    });
+    poiRowsRaw.push(...rows);
+  }
+  const poiRows = poiRowsRaw.map((p) => ({
+    ...p,
+    places: [{ placeId: convToCity.get(p.id) ?? "" }],
+  }));
   const validKinds = new Set<NonNullable<POIData["kind"]>>([
     "code", "research", "personal", "question", "creative", "decision",
   ]);

@@ -102,12 +102,21 @@ export function CityDetailPanel({
   onClose,
   allCities,
   countryById,
+  selectedConv,
 }: {
   city: CityData | null;
   country: CountryData | null;
   onClose: () => void;
   allCities: CityData[];
   countryById: Map<string, CountryData>;
+  // When set, the panel shows messages from this specific POI conversation
+  // instead of the city's static sample. Atlas.tsx populates this when a
+  // POI is clicked.
+  selectedConv?: {
+    id: string;
+    title: string | null;
+    messages: { role: "user" | "assistant"; text: string }[];
+  } | null;
 }) {
   // Chat state
   const [chatMode, setChatMode] = useState(false);
@@ -270,9 +279,15 @@ export function CityDetailPanel({
                 </button>
               </div>
             </div>
-            <h2 className="mt-2 text-2xl font-medium text-stone-800">{city.label}</h2>
-            {city.labelJa && (
-              <p className="text-sm text-stone-500 mt-0.5">{city.labelJa}</p>
+            <h2 className="mt-2 text-2xl font-medium text-stone-800">
+              {selectedConv?.title || city.label}
+            </h2>
+            {selectedConv ? (
+              <p className="text-sm text-stone-500 mt-0.5">{city.label}</p>
+            ) : (
+              city.labelJa && (
+                <p className="text-sm text-stone-500 mt-0.5">{city.labelJa}</p>
+              )
             )}
             <div className="mt-3 flex items-center gap-3 text-xs text-stone-500">
               <span className="inline-flex items-center gap-1.5">
@@ -282,7 +297,11 @@ export function CityDetailPanel({
                 />
                 density {city.urbanDensity}/10
               </span>
-              {city.messages && <span>· {city.messages.length} messages</span>}
+              {selectedConv ? (
+                <span>· {selectedConv.messages.length} messages</span>
+              ) : (
+                city.messages && <span>· {city.messages.length} messages</span>
+              )}
               {chatMode && chatMessages.length > 0 && (
                 <span>· {chatMessages.length} new</span>
               )}
@@ -354,7 +373,15 @@ export function CityDetailPanel({
           ) : (
             <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5 min-h-0">
               {!chatMode ? (
-                <CityOverview city={city} />
+                selectedConv ? (
+                  <ul className="space-y-2.5">
+                    {selectedConv.messages.map((m, i) => (
+                      <MessageBubble key={i} role={m.role} text={m.text} />
+                    ))}
+                  </ul>
+                ) : (
+                  <CityOverview city={city} />
+                )
               ) : (
                 <ul className="space-y-2.5">
                   {city.messages && city.messages.length > 0 && (
