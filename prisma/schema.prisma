@@ -11,7 +11,12 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  // Solo-mode default: SQLite stored at the path in DATABASE_URL
+  // (e.g. file:./atlas.db for dev, or an OS-app-data path for the
+  // packaged Electron build). Postgres support remains in earlier
+  // commits if a multi-tenant deployment is needed; the local-first
+  // story is now the canonical path.
+  provider = "sqlite"
 }
 
 // ============================================================================
@@ -40,12 +45,12 @@ model Account {
   type              String
   provider          String
   providerAccountId String
-  refresh_token     String? @db.Text
-  access_token      String? @db.Text
+  refresh_token     String?
+  access_token      String?
   expires_at        Int?
   token_type        String?
   scope             String?
-  id_token          String? @db.Text
+  id_token          String?
   session_state     String?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -78,7 +83,7 @@ model ApiKey {
   userId      String
   provider    String   @default("anthropic")
   // AES-256-GCM ciphertext encoded as: base64(iv) "." base64(ciphertext) "." base64(authTag)
-  ciphertext  String   @db.Text
+  ciphertext  String 
   // Last 4 chars of the plaintext key, for display ("sk-...abcd")
   hint        String
   label       String?
@@ -218,7 +223,7 @@ model Place {
   // City-only: legacy CityRank for label/pin styling continuity.
   cityRank  CityRank?
   // City-only: short narrative summary surfaced in the side panel.
-  summary   String?    @db.Text
+  summary   String?  
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 
@@ -284,7 +289,7 @@ model Message {
   // 0-based ordinal within the conversation
   ordinal         Int
   role            String   // user | assistant | system | tool
-  text            String   @db.Text
+  text            String 
   // Phase 4: topic-segment id for in-conversation splitting. Null in Phase 2.
   topicSegmentId  String?
   createdAt       DateTime?
@@ -302,7 +307,7 @@ model Road {
   toId      String
   type      RoadType @default(regular)
   label     String?
-  rationale String?  @db.Text
+  rationale String?
   // Conceptual link strength from the LLM (0..1). Drives bundling weight
   // and may inform render width in future iterations.
   weight    Float    @default(1)
@@ -338,7 +343,7 @@ model Artifact {
   kind          ArtifactKind
   landmarkType  LandmarkType
   title         String
-  content       String       @db.Text
+  content       String     
   createdAt     DateTime     @default(now())
 
   place Place @relation(fields: [placeId], references: [id], onDelete: Cascade)

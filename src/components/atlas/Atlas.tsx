@@ -16,6 +16,7 @@ import { Legend } from "./Legend";
 import { CityDetailPanel } from "./CityDetailPanel";
 import { Districts } from "./Districts";
 import { POILayer } from "./POILayer";
+import { SearchBox, type SearchTarget } from "./SearchBox";
 import { ATLAS_STYLE } from "@/lib/atlas-style";
 import { bundleSharedTrunks } from "@/lib/bundle-trunks";
 
@@ -79,6 +80,43 @@ export function Atlas({ map }: { map: SampleMap }) {
     const behavior = zoomRef.current;
     if (!svg || !behavior) return;
     select(svg).transition().duration(200).call(behavior.scaleBy, factor);
+  };
+
+  // Fly the camera to a search-result target. The d3-zoom transform maps
+  // canvas coords (cx, cy) to screen position (W/2, H/2) at scale k via:
+  //   transform = translate(W/2 - cx*k, H/2 - cy*k).scale(k)
+  // viewBox already maps the SVG coord system, so passing the viewBox W/H
+  // is correct here.
+  const flyTo = (target: SearchTarget) => {
+    const svg = svgRef.current;
+    const behavior = zoomRef.current;
+    if (!svg || !behavior) return;
+    const { width: vw, height: vh } = map.viewBox;
+    const k = Math.min(MAX_SCALE, Math.max(MIN_SCALE, target.zoomTo));
+    const [cx, cy] = target.position;
+    const tx = vw / 2 - cx * k;
+    const ty = vh / 2 - cy * k;
+    select(svg)
+      .transition()
+      .duration(600)
+      .call(behavior.transform, zoomIdentity.translate(tx, ty).scale(k));
+
+    // Side-effects: highlight the target so the user sees what they
+    // landed on. POIs select both POI + parent city so the detail panel
+    // shows context.
+    if (target.kind === "city") {
+      setSelectedCityId(target.id.replace(/^city-/, ""));
+      setSelectedConvId(null);
+    } else if (target.kind === "poi") {
+      const poi = pois.find((p) => p.id === target.id);
+      if (poi) {
+        setSelectedConvId(poi.conversationId);
+        setSelectedCityId(poi.cityId);
+      }
+    } else {
+      setSelectedCityId(null);
+      setSelectedConvId(null);
+    }
   };
 
   const { width, height } = map.viewBox;
@@ -148,8 +186,16 @@ export function Atlas({ map }: { map: SampleMap }) {
       </svg>
 
       {/* Floating chrome — kept minimal, Google-Maps-ish */}
-      <div className="absolute top-3 left-3 bg-white rounded-md shadow-md px-3 py-2 text-sm text-stone-700">
-        <span className="font-medium">{map.title}</span>
+      <div className="absolute top-3 left-3 flex items-start gap-2">
+        <div className="bg-white rounded-md shadow-md px-3 py-2 text-sm text-stone-700 h-10 flex items-center">
+          <span className="font-medium">{map.title}</span>
+        </div>
+        <SearchBox
+          cities={map.cities}
+          countries={map.countries}
+          pois={pois}
+          onSelect={flyTo}
+        />
       </div>
 
 

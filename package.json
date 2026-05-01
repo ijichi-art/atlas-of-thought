@@ -13,8 +13,10 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.90.0",
     "@auth/prisma-adapter": "^2.11.2",
+    "@prisma/adapter-better-sqlite3": "^7.8.0",
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
+    "better-sqlite3": "^12.9.0",
     "d3": "^7.9.0",
     "d3-force": "^3.0.0",
     "d3-zoom": "^3.0.0",

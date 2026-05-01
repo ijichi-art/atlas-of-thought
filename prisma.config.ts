@@ -13,6 +13,9 @@ export default defineConfig({
     path: path.join("prisma", "migrations"),
   },
   datasource: {
-    url: process.env.DATABASE_URL!,
+    // Solo-mode default: SQLite file inside ./prisma so dev setups don't
+    // need a Postgres server. Electron build sets this to an OS app-data
+    // path before importing the runtime.
+    url: process.env.DATABASE_URL ?? "file:./prisma/dev.db",
   },
 });

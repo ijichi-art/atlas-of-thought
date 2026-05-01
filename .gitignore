@@ -47,9 +47,11 @@ next-env.d.ts
 *.swp
 *.swo
 
-# prisma local artifacts (if SQLite ever used)
+# prisma local SQLite database (solo mode default location)
 prisma/*.db
 prisma/*.db-journal
+prisma/*.db-shm
+prisma/*.db-wal
 prisma/dev.db*
 
 # generated prisma client (we keep it inside node_modules path)
