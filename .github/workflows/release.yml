@@ -39,7 +39,7 @@ jobs:
         # is created lazily by Electron at first launch.
         run: |
           npx prisma generate
-          npx prisma db push --skip-generate
+          npx prisma db push
 
       - name: Build (Mac)
         if: matrix.os == 'macos-latest'
