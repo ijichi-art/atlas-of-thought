@@ -30,10 +30,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Generate Prisma client
+      - name: Generate Prisma client + create empty SQLite schema
         env:
           DATABASE_URL: file:./prisma/dev.db
-        run: npx prisma generate
+        # `prisma db push` creates the SQLite file with all tables. Next.js
+        # touches Prisma during prerender of pages like /login and /import,
+        # so the schema must exist at build time. The actual user database
+        # is created lazily by Electron at first launch.
+        run: |
+          npx prisma generate
+          npx prisma db push --skip-generate
 
       - name: Build (Mac)
         if: matrix.os == 'macos-latest'
