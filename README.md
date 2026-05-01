@@ -38,11 +38,23 @@ diagrams or require manual layout. Atlas of Thought generates a **real
 geographic map** automatically — countries, cities, roads, rivers — from
 the shape of what you've discussed.
 
-## Quick start (Solo mode, ~5 minutes)
+## Download (desktop app)
 
-Solo mode runs everything on your machine. SQLite, no Postgres, no
-Docker, no GitHub OAuth. The Electron build (coming soon) is a
-double-click installer; for now you run the dev server.
+When a `v*.*.*` git tag is pushed, GitHub Actions builds **unsigned**
+Mac / Windows / Linux installers and attaches them to a GitHub release.
+First launch (one extra click, once):
+
+- **macOS**: right-click the app → *Open* → confirm
+- **Windows**: when SmartScreen warns, click *More info* → *Run anyway*
+- **Linux**: AppImage may need `chmod +x` first
+
+After install: open the app → paste your LLM API key in Settings →
+import a chat export → click *Terraform*.
+
+## Quick start (Solo mode, ~5 minutes from source)
+
+Run from source if you want to hack on it or your platform isn't built
+yet. SQLite, no Postgres, no Docker, no GitHub OAuth.
 
 **Prerequisites:** Node 20+ (or 22+).
 
@@ -104,7 +116,7 @@ similarity and roads connect topics that recur together.
 - ✅ **Phase 4** — Auto-terraforming (LLM cartography + Euclidean MST + FDEB)
 - ✅ **Phase 5** — In-map search (Google-Maps style)
 - ✅ **Solo mode** — SQLite + no auth → runs locally on one machine
-- 🚧 **Electron build** — desktop app, double-click install ← *next*
+- ✅ **Electron build** — desktop app, double-click install (unsigned releases)
 - 🚧 **Public launch** — Show HN, Product Hunt
 - 🔮 **Publish snapshot** — opt-in cloud share of a static map render
 - 🔮 **City comparison & artifact landmarks**

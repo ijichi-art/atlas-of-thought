@@ -26,9 +26,19 @@ Atlas of Thought は、ChatGPT / Claude / Gemini との会話履歴を **生き�
 
 類似ツール (ChatGPT-2D、ChatMap、Obsidian Canvas) はノードリンク図で止まる、または手作業レイアウトを要求する。Atlas of Thought は会話の形から **本物の地理マップ** を自動生成する — 国、都市、道路、河川まで。
 
-## クイックスタート (Solo モード、約 5 分)
+## ダウンロード (デスクトップアプリ)
 
-Solo モードはすべて自分のマシンで動く。SQLite、Postgres 不要、Docker 不要、GitHub OAuth 不要。
+`v*.*.*` git tag が push されると GitHub Actions が **unsigned** な Mac / Windows / Linux インストーラを自動ビルドして GitHub Releases に添付。初回起動 (1 回だけ追加クリック):
+
+- **macOS**: アプリを右クリック → *開く* → 確認
+- **Windows**: SmartScreen 警告で *詳細情報* → *実行*
+- **Linux**: AppImage は `chmod +x` 必要なことあり
+
+インストール後: アプリ起動 → Settings で LLM API key 貼る → 履歴 import → *Terraform*。
+
+## クイックスタート (Solo モード、ソースから 5 分)
+
+ソースから走らせる場合 (開発したい人 / binary が自分のプラットフォーム向けにまだない人)。SQLite、Postgres 不要、Docker 不要、GitHub OAuth 不要。
 
 **前提:** Node 20+ (or 22+)。
 
@@ -75,7 +85,7 @@ Next.js 16 (App Router) · TypeScript · Tailwind 4 · Prisma + SQLite (better-s
 - ✅ **Phase 4** — Auto-terraform (LLM cartography + Euclidean MST + 5 bypass shortcuts)
 - ✅ **Phase 5** — 地図内検索 (Google Maps 風)
 - ✅ **Solo モード** — SQLite + 認証なしで 1 台で動く
-- 🚧 **Electron 版** — デスクトップアプリ、ダブルクリック ← 次
+- ✅ **Electron 版** — デスクトップアプリ、ダブルクリック (unsigned リリース)
 - 🚧 **Public launch** — Show HN、Product Hunt
 - 🔮 **Publish snapshot** — オプトインのクラウド共有 (静的 render のみ)
 - 🔮 **都市間比較・artifact landmarks**

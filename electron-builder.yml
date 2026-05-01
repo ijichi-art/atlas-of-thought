@@ -1,0 +1,74 @@
+# electron-builder config — packages the Next.js standalone server +
+# Electron shell into platform installers. Code signing is intentionally
+# OFF: launch is unsigned (user does right-click → Open on Mac, "More
+# info → Run anyway" on Windows). Signing can be added later by setting
+# the env vars listed at https://www.electron.build/code-signing without
+# touching this file.
+
+appId: dev.ijichi-art.atlas-of-thought
+productName: Atlas of Thought
+copyright: "Copyright © 2026 ijichi-art"
+
+# What goes inside the asar / app bundle:
+files:
+  - electron/**
+  - package.json
+  # Next.js standalone bundle:
+  - .next/standalone/**
+  - .next/static/**
+  - public/**
+  # Prisma artefacts the standalone bundle pulls at runtime:
+  - src/generated/prisma/**
+  - node_modules/@prisma/adapter-better-sqlite3/**
+  - node_modules/better-sqlite3/**
+  # Exclusions to keep the build small:
+  - "!**/*.{md,markdown,test.js,test.ts,spec.js,spec.ts}"
+  - "!**/{LICENSE,LICENCE,license,licence}*"
+  - "!**/.{git,DS_Store,vscode,idea}*"
+
+# Where the package outputs end up:
+directories:
+  output: dist-electron
+  buildResources: electron-resources
+
+# The Next.js standalone trace puts everything under .next/standalone,
+# but server.js expects to find static + public siblings of itself.
+# extraResources copies them into the app bundle so the prod main process
+# can reference them via process.resourcesPath.
+extraResources:
+  - from: ".next/static"
+    to: "app/.next/static"
+  - from: "public"
+    to: "app/public"
+
+mac:
+  category: public.app-category.productivity
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  icon: electron-resources/icon.icns
+  # Disable mandatory signing/notarization for unsigned builds.
+  identity: null
+  hardenedRuntime: false
+  gatekeeperAssess: false
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: electron-resources/icon.ico
+  # Don't try to sign — leave the SmartScreen warning for now.
+
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Office
+  icon: electron-resources/icon.png
+
+# Auto-updater stays disabled until we're shipping signed builds. Setting
+# `publish: null` keeps electron-builder from looking for GH credentials.
+publish: null

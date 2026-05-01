@@ -1,0 +1,90 @@
+name: Release Electron build
+
+# Triggered when a tag like v1.0.0 is pushed. Builds Mac (Intel +
+# Apple Silicon dmg), Windows (NSIS installer), and Linux (AppImage +
+# .deb). All builds are unsigned — see electron-builder.yml.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        env:
+          DATABASE_URL: file:./prisma/dev.db
+        run: npx prisma generate
+
+      - name: Build (Mac)
+        if: matrix.os == 'macos-latest'
+        run: npm run electron:build:mac
+
+      - name: Build (Windows)
+        if: matrix.os == 'windows-latest'
+        run: npm run electron:build:win
+
+      - name: Build (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run electron:build:linux
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: atlas-${{ matrix.os }}
+          path: |
+            dist-electron/*.dmg
+            dist-electron/*.exe
+            dist-electron/*.AppImage
+            dist-electron/*.deb
+          if-no-files-found: warn
+
+  release:
+    name: Publish to GitHub Releases
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+          body: |
+            ## Atlas of Thought ${{ github.ref_name }}
+
+            Local-first desktop app — drop your AI chat history, get a
+            Google-Maps-style atlas of your thinking.
+
+            **Downloads** are unsigned. First launch:
+            - **macOS**: right-click the app → *Open* → *Open* (one time)
+            - **Windows**: when SmartScreen warns, click *More info* → *Run anyway*
+            - **Linux**: `chmod +x atlas-of-thought-*.AppImage` if needed
+
+            See the [README](https://github.com/ijichi-art/atlas-of-thought#quick-start)
+            for first-run setup (paste your LLM API key, import a chat
+            export, click *Terraform*).

@@ -1,6 +1,14 @@
 {
   "name": "atlas-of-thought",
+  "productName": "Atlas of Thought",
   "version": "0.1.0",
+  "description": "Turn your AI conversations into a Google-Maps-style atlas. Local-first desktop app.",
+  "author": {
+    "name": "ijichi-art",
+    "url": "https://github.com/ijichi-art"
+  },
+  "homepage": "https://github.com/ijichi-art/atlas-of-thought",
+  "main": "electron/main.js",
   "private": true,
   "scripts": {
     "dev": "next dev -p 3002",
@@ -8,7 +16,12 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "electron:dev": "concurrently --kill-others --names next,electron --prefix-colors blue,green \"next dev -p 3002\" \"wait-on http://localhost:3002 && electron .\"",
+    "electron:build": "next build && electron-builder",
+    "electron:build:mac": "next build && electron-builder --mac",
+    "electron:build:win": "next build && electron-builder --win",
+    "electron:build:linux": "next build && electron-builder --linux"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.90.0",
@@ -44,10 +57,14 @@
     "@types/pg": "^8.20.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "concurrently": "^9.2.1",
+    "electron": "^41.4.0",
+    "electron-builder": "^26.8.1",
     "eslint": "^9",
     "eslint-config-next": "16.2.4",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vitest": "^4.1.5"
+    "vitest": "^4.1.5",
+    "wait-on": "^9.0.5"
   }
 }
