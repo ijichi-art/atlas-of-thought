@@ -19,6 +19,12 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest, ubuntu-latest]
 
+    # Ensure every step (prisma db push + next build's prerender) uses
+    # the same SQLite path so the tables created in setup are visible
+    # during the build's prerender pass.
+    env:
+      DATABASE_URL: file:./prisma/dev.db
+
     steps:
       - uses: actions/checkout@v4
 
@@ -31,8 +37,6 @@ jobs:
         run: npm ci
 
       - name: Generate Prisma client + create empty SQLite schema
-        env:
-          DATABASE_URL: file:./prisma/dev.db
         # `prisma db push` creates the SQLite file with all tables. Next.js
         # touches Prisma during prerender of pages like /login and /import,
         # so the schema must exist at build time. The actual user database
