@@ -5,6 +5,7 @@
   "description": "Turn your AI conversations into a Google-Maps-style atlas. Local-first desktop app.",
   "author": {
     "name": "ijichi-art",
+    "email": "noreply@github.com",
     "url": "https://github.com/ijichi-art"
   },
   "homepage": "https://github.com/ijichi-art/atlas-of-thought",
