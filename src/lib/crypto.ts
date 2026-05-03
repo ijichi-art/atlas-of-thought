@@ -11,15 +11,26 @@ import {
 const ALGO = "aes-256-gcm";
 const IV_BYTES = 12;
 
+// Minimum acceptable length for ENCRYPTION_KEY input. Anything shorter is
+// almost certainly a placeholder ("test", "secret", a single character)
+// that would silently produce a guessable SHA-256 key. Reject early so we
+// don't "succeed" with bad crypto.
+const MIN_KEY_LEN = 16;
+
 function getKey(): Buffer {
   const raw = process.env.ENCRYPTION_KEY;
   if (!raw) {
     throw new Error(
-      "ENCRYPTION_KEY is not set. Generate one with `openssl rand -base64 32` and add it to .env.local."
+      "ENCRYPTION_KEY is not set. Generate one with `openssl rand -base64 32` and add it to .env.local.",
     );
   }
-  // Accept any length input but derive a stable 32-byte key with SHA-256.
-  // This means a base64-32 input or a passphrase both work.
+  if (raw.length < MIN_KEY_LEN) {
+    throw new Error(
+      `ENCRYPTION_KEY is too short (${raw.length} chars). It must be at least ${MIN_KEY_LEN} characters of high-entropy input. Generate one with \`openssl rand -base64 32\`.`,
+    );
+  }
+  // Accept any length input ≥ MIN_KEY_LEN but derive a stable 32-byte key
+  // with SHA-256 so both a passphrase and a base64-32 string work.
   return createHash("sha256").update(raw, "utf8").digest();
 }
 

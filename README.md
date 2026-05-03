@@ -182,6 +182,31 @@ team deployments, the legacy Postgres + GitHub OAuth path is preserved
 on the `pre-solo-mode` git tag — see `docs/multitenant.md` (TODO) for
 the upgrade flow.
 
+> ## ⚠️ Security: don't expose Solo mode to the network
+>
+> Solo mode has **NO authentication**. The single-user "stub" treats
+> any request as the solo user with full read/write access. That's
+> intentional for the local-first use case (Electron app, or
+> `npm run dev` on your laptop), but it means:
+>
+> - **DO NOT** run Solo mode behind a public URL without external
+>   auth (reverse-proxy basic auth, OAuth proxy, VPN, etc.).
+> - **DO NOT** publish a Docker container with `-p 3000:3000` on a
+>   server reachable from the internet.
+>
+> Concrete safeguards in this repo:
+>
+> - `npm run dev` and `npm run start` bind to `127.0.0.1` only.
+> - `electron/main.js` sets `HOSTNAME=127.0.0.1` for the bundled
+>   server.
+> - `docker-compose.yml` publishes ports as `127.0.0.1:3000:3000`.
+> - `src/auth.ts` **refuses to start** if `HOSTNAME` is set to
+>   anything non-loopback unless `ATLAS_ALLOW_NETWORK=1` is also
+>   set as an explicit operator opt-in.
+>
+> If you need a multi-user deployment, restore real auth from the
+> `pre-solo-mode` tag instead of bypassing the guard.
+
 ## License
 
 MIT — see [LICENSE](./LICENSE).

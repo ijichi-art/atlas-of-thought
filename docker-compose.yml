@@ -1,3 +1,26 @@
+# ─────────────────────────────────────────────────────────────────────
+# Atlas of Thought — legacy multi-tenant Postgres deployment
+#
+# ⚠️  IMPORTANT — this stack still ships the original auth surface
+#     (NextAuth + GitHub OAuth) for multi-user scenarios. The current
+#     `main` branch ships in Solo mode (single-user, no auth) so this
+#     compose file is kept for reference but is NOT the recommended
+#     way to run the project. The Electron desktop build is the
+#     supported path; see README.
+#
+# ⚠️  SECURITY — every port below is bound to 127.0.0.1 ONLY so a
+#     careless `docker compose up` can't expose the database or the app
+#     to the local network / public internet. If you want external
+#     access:
+#       1. Put a reverse proxy (Nginx / Caddy / Traefik) IN FRONT
+#          with HTTPS + auth (basic auth, OAuth proxy, IP allowlist,
+#          or VPN).
+#       2. Then change "127.0.0.1:3000:3000" to "3000:3000" so the
+#          proxy can reach the container.
+#     DO NOT skip step 1 unless you intend the entire app to be
+#     publicly readable AND writable by anyone on the internet.
+# ─────────────────────────────────────────────────────────────────────
+
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -6,8 +29,10 @@ services:
       POSTGRES_USER: atlas
       POSTGRES_PASSWORD: atlas
       POSTGRES_DB: atlas
+    # Loopback-only — change to "5432:5432" only if you really need
+    # external DB access (and you accept the atlas/atlas dev creds).
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - atlas-pg-data:/var/lib/postgresql/data
     healthcheck:
@@ -19,8 +44,9 @@ services:
   app:
     build: .
     container_name: atlas-app
+    # Loopback-only — see banner above for how to expose externally.
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
       postgres:
         condition: service_healthy

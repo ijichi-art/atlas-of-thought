@@ -52,6 +52,13 @@ export async function POST(req: Request) {
   const mapId = map.id;
 
   // Resolve or create the DB conversation.
+  // SECURITY: the user-supplied conversationId is treated as a HINT, not
+  // an authority. We only honour it if a conversation with that id ALSO
+  // belongs to mapId (which itself came from the authenticated userId
+  // above). If the hint doesn't match, we silently fall back to creating
+  // a fresh conversation — no info leak about whether the id exists in
+  // another user's data, and no possibility of writing into someone
+  // else's conversation by guessing CUIDs.
   let convId = conversationId;
   if (convId) {
     const existing = await prisma.conversation.findFirst({
