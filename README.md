@@ -145,67 +145,32 @@ machine** except as outbound HTTPS to the provider you chose.
 
 ## Privacy
 
-- **Local-first by design.** All conversations and the generated map
-  live in `prisma/dev.db` on your machine (or, in the desktop app,
-  `~/Library/Application Support/Atlas of Thought/atlas.db` on macOS,
-  the equivalent app-data dir on Windows / Linux).
-- **No telemetry, no analytics.** The app makes outbound HTTPS only
-  when you click *Terraform* (to your chosen LLM provider) or browse
-  share URLs (Phase 5+, opt-in).
-- **No central server.** There's no atlas-of-thought.com that holds
-  your data. The future *Publish snapshot* feature uploads a single
-  static render of a map you choose — never the underlying chat data.
-- **Importer parses files locally.** Your ChatGPT export zip is read
-  in the Node process; nothing about the contents is sent anywhere
-  except the cartographer LLM call you initiate.
-- **Servers bind to 127.0.0.1 only.** Both the dev server and the
-  bundled Electron Next.js process listen on loopback so nothing on
-  your local Wi-Fi can reach the app.
+Atlas of Thought is built so your AI conversations stay yours:
 
-### Things to know
+- **Everything runs on your machine.** The desktop app ships its own
+  Next.js server bound to `127.0.0.1` and a SQLite database in your
+  OS app-data dir. Nothing on your local network can reach the app.
+- **No telemetry.** The only outbound HTTPS the app makes is the LLM
+  call you initiate when you click *Terraform*, and that goes
+  directly to the provider you chose with the API key you provided.
+- **No central service.** There's no `atlas-of-thought.com` that
+  holds anyone's data. (The future *Publish snapshot* feature is
+  opt-in per map and uploads only the static render — never the
+  underlying chat data.)
+- **API keys are encrypted at rest** with AES-256-GCM. Plaintext
+  keys never leave the in-memory request that talks to the provider.
+- **Importers parse files locally.** Your ChatGPT export zip is read
+  in-process; the only outbound use of its contents is the LLM
+  cartographer call.
 
-- **The SQLite file is plaintext.** Conversation messages are stored
-  unencrypted at rest. If your laptop disk isn't encrypted (FileVault
-  / BitLocker), anyone with physical access can read the chat history.
-- **API keys are encrypted with AES-256-GCM** using `ENCRYPTION_KEY`
-  from your `.env.local`. The key sits next to the ciphertext, so the
-  encryption protects against casual snooping but not against full
-  filesystem access. OS-keychain integration is on the roadmap.
-- **iCloud / Time Machine / Dropbox** backing up your home directory
-  will copy the SQLite file too. If that matters, exclude the app-data
-  dir from your backup tool.
+For full disk encryption, OS-keychain integration, and exclusion
+hints for cloud backup tools, see [`docs/security.md`](docs/security.md).
 
 ## Self-hosting variants
 
-Solo mode (above) is the recommended path. For multi-tenant or
-team deployments, the legacy Postgres + GitHub OAuth path is preserved
-on the `pre-solo-mode` git tag — see `docs/multitenant.md` (TODO) for
-the upgrade flow.
-
-> ## ⚠️ Security: don't expose Solo mode to the network
->
-> Solo mode has **NO authentication**. The single-user "stub" treats
-> any request as the solo user with full read/write access. That's
-> intentional for the local-first use case (Electron app, or
-> `npm run dev` on your laptop), but it means:
->
-> - **DO NOT** run Solo mode behind a public URL without external
->   auth (reverse-proxy basic auth, OAuth proxy, VPN, etc.).
-> - **DO NOT** publish a Docker container with `-p 3000:3000` on a
->   server reachable from the internet.
->
-> Concrete safeguards in this repo:
->
-> - `npm run dev` and `npm run start` bind to `127.0.0.1` only.
-> - `electron/main.js` sets `HOSTNAME=127.0.0.1` for the bundled
->   server.
-> - `docker-compose.yml` publishes ports as `127.0.0.1:3000:3000`.
-> - `src/auth.ts` **refuses to start** if `HOSTNAME` is set to
->   anything non-loopback unless `ATLAS_ALLOW_NETWORK=1` is also
->   set as an explicit operator opt-in.
->
-> If you need a multi-user deployment, restore real auth from the
-> `pre-solo-mode` tag instead of bypassing the guard.
+Solo mode (above) is the recommended path. For multi-tenant or team
+deployments, the legacy Postgres + GitHub OAuth path is preserved on
+the `pre-solo-mode` git tag.
 
 ## License
 
