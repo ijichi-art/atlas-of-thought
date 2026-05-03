@@ -90,6 +90,10 @@ async function startProdServer() {
       ...process.env,
       ELECTRON_RUN_AS_NODE: "1",
       PORT: String(PROD_PORT),
+      // Bind ONLY to loopback so the bundled Next.js server isn't
+      // reachable from the local network. Without this, anyone on the
+      // same Wi-Fi could browse your atlas at http://your-ip:3892.
+      HOSTNAME: "127.0.0.1",
       DATABASE_URL: dbUrl,
       NODE_ENV: "production",
       NEXT_PUBLIC_ORIGIN: PROD_URL,

@@ -146,7 +146,9 @@ machine** except as outbound HTTPS to the provider you chose.
 ## Privacy
 
 - **Local-first by design.** All conversations and the generated map
-  live in `prisma/dev.db` on your machine.
+  live in `prisma/dev.db` on your machine (or, in the desktop app,
+  `~/Library/Application Support/Atlas of Thought/atlas.db` on macOS,
+  the equivalent app-data dir on Windows / Linux).
 - **No telemetry, no analytics.** The app makes outbound HTTPS only
   when you click *Terraform* (to your chosen LLM provider) or browse
   share URLs (Phase 5+, opt-in).
@@ -156,6 +158,22 @@ machine** except as outbound HTTPS to the provider you chose.
 - **Importer parses files locally.** Your ChatGPT export zip is read
   in the Node process; nothing about the contents is sent anywhere
   except the cartographer LLM call you initiate.
+- **Servers bind to 127.0.0.1 only.** Both the dev server and the
+  bundled Electron Next.js process listen on loopback so nothing on
+  your local Wi-Fi can reach the app.
+
+### Things to know
+
+- **The SQLite file is plaintext.** Conversation messages are stored
+  unencrypted at rest. If your laptop disk isn't encrypted (FileVault
+  / BitLocker), anyone with physical access can read the chat history.
+- **API keys are encrypted with AES-256-GCM** using `ENCRYPTION_KEY`
+  from your `.env.local`. The key sits next to the ciphertext, so the
+  encryption protects against casual snooping but not against full
+  filesystem access. OS-keychain integration is on the roadmap.
+- **iCloud / Time Machine / Dropbox** backing up your home directory
+  will copy the SQLite file too. If that matters, exclude the app-data
+  dir from your backup tool.
 
 ## Self-hosting variants
 
