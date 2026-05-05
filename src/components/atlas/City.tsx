@@ -85,7 +85,6 @@ export function City({
       {showLabel && (
         <g
           transform={`translate(${cx} ${cy + lab.labelDy * inv}) scale(${inv})`}
-          pointerEvents="none"
         >
           <text
             textAnchor="middle"

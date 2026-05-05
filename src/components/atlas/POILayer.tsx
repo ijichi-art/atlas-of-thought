@@ -87,7 +87,6 @@ export function POILayer({
                   stroke: cfg.haloColor,
                   strokeWidth: cfg.haloWidth,
                   strokeLinejoin: "round",
-                  pointerEvents: "none",
                 }}
               >
                 {truncate(p.label, 28)}

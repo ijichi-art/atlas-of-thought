@@ -125,7 +125,7 @@ export function CityDetailPanel({
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
   const [chatError, setChatError] = useState<string | null>(null);
-  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [conversationId, setConversationId] = useState<string | null>(selectedConv?.id ?? null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -139,14 +139,14 @@ export function CityDetailPanel({
     setChatMode(false);
     setChatMessages([]);
     setChatError(null);
-    setConversationId(null);
+    setConversationId(selectedConv?.id ?? null);
     setStreamingContent("");
     setIsStreaming(false);
     setInputText("");
     setCompareCity(null);
     setPickingCompare(false);
     setCompareSearch("");
-  }, [city?.id]);
+  }, [city?.id, selectedConv?.id]);
 
   useEffect(() => {
     if (chatMode) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -166,8 +166,11 @@ export function CityDetailPanel({
     setStreamingContent("");
     setChatError(null);
 
+    // Prefer the actual POI conversation when one was opened, otherwise
+    // fall back to the city's static cluster sample.
+    const baseMessages = selectedConv?.messages ?? city?.messages ?? [];
     const history: ChatMsg[] = [
-      ...(city?.messages?.map((m) => ({ role: m.role as "user" | "assistant", text: m.text })) ?? []),
+      ...baseMessages.map((m) => ({ role: m.role as "user" | "assistant", text: m.text })),
       ...chatMessages,
     ];
 
@@ -384,11 +387,17 @@ export function CityDetailPanel({
                 )
               ) : (
                 <ul className="space-y-2.5">
-                  {city.messages && city.messages.length > 0 && (
-                    <li className="text-[11px] text-stone-400 text-center py-1">
-                      — continuing from {city.messages.length} previous messages —
-                    </li>
-                  )}
+                  {(selectedConv?.messages ?? city.messages ?? []).map((m, i) => (
+                    <MessageBubble
+                      key={`prev-${i}`}
+                      role={m.role as "user" | "assistant"}
+                      text={m.text}
+                    />
+                  ))}
+                  {chatMessages.length > 0 &&
+                    (selectedConv?.messages.length || city.messages?.length || 0) > 0 && (
+                      <li className="text-[11px] text-stone-400 text-center py-1">— new —</li>
+                    )}
                   {chatMessages.map((m, i) => (
                     <MessageBubble key={i} role={m.role} text={m.text} />
                   ))}

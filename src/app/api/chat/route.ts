@@ -13,7 +13,7 @@ const Body = z.object({
     .max(200)
     .optional(),
   text: z.string().min(1).max(8000),
-  conversationId: z.string().optional(),
+  conversationId: z.string().nullable().optional(),
 });
 
 export async function POST(req: Request) {
@@ -37,35 +37,41 @@ export async function POST(req: Request) {
     );
   }
 
-  // Ensure the user has a map to attach the conversation to.
-  let map = await prisma.map.findFirst({
-    where: { userId },
-    orderBy: { updatedAt: "desc" },
-    select: { id: true },
-  });
-  if (!map) {
-    map = await prisma.map.create({
-      data: { userId, title: "My Atlas" },
-      select: { id: true },
-    });
-  }
-  const mapId = map.id;
-
-  // Resolve or create the DB conversation.
-  // SECURITY: the user-supplied conversationId is treated as a HINT, not
-  // an authority. We only honour it if a conversation with that id ALSO
-  // belongs to mapId (which itself came from the authenticated userId
-  // above). If the hint doesn't match, we silently fall back to creating
-  // a fresh conversation — no info leak about whether the id exists in
-  // another user's data, and no possibility of writing into someone
-  // else's conversation by guessing CUIDs.
-  let convId = conversationId;
+  // Resolve mapId + convId.
+  // SECURITY: the user-supplied conversationId is a HINT. We only honour
+  // it if it belongs to a Map owned by the authenticated user. When it
+  // does, we derive mapId FROM the conversation — so multi-map users keep
+  // continuing-from-POI in the right map, instead of always landing in
+  // their most-recently-updated one. When the hint is absent or doesn't
+  // validate, we fall back to "user's latest map" (creating one if none
+  // exists). No info leak: a bad id silently turns into a fresh
+  // conversation in the latest map.
+  let mapId: string | null = null;
+  let convId: string | undefined = conversationId ?? undefined;
   if (convId) {
     const existing = await prisma.conversation.findFirst({
-      where: { id: convId, mapId },
+      where: { id: convId, map: { userId } },
+      select: { mapId: true },
+    });
+    if (existing) {
+      mapId = existing.mapId;
+    } else {
+      convId = undefined;
+    }
+  }
+  if (!mapId) {
+    let map = await prisma.map.findFirst({
+      where: { userId },
+      orderBy: { updatedAt: "desc" },
       select: { id: true },
     });
-    if (!existing) convId = undefined;
+    if (!map) {
+      map = await prisma.map.create({
+        data: { userId, title: "My Atlas" },
+        select: { id: true },
+      });
+    }
+    mapId = map.id;
   }
   if (!convId) {
     const conv = await prisma.conversation.create({
