@@ -7,6 +7,7 @@ import {
   setUserChatProvider,
   type Provider,
 } from "@/lib/api-keys";
+import { rejectUntrustedRequest } from "@/lib/request-security";
 
 const VALID_PROVIDERS = new Set<Provider>(["anthropic", "openai", "deepseek"]);
 
@@ -22,6 +23,9 @@ function resolveProvider(raw: string): Provider | null {
 }
 
 export async function POST(req: Request, { params }: { params: Promise<{ provider: string }> }) {
+  const rejection = rejectUntrustedRequest(req);
+  if (rejection) return rejection;
+
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -57,6 +61,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ provide
 }
 
 export async function DELETE(req: Request, { params }: { params: Promise<{ provider: string }> }) {
+  const rejection = rejectUntrustedRequest(req);
+  if (rejection) return rejection;
+
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

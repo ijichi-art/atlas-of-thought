@@ -137,12 +137,15 @@ You supply your own LLM API key. Supported providers:
 | **Anthropic** | `claude-haiku-4-5` | ~$3 |
 
 Get a key at the provider's console (links in the in-app Settings page).
-Your key is encrypted with AES-256-GCM using `ENCRYPTION_KEY` from your
-`.env.local` and stored locally in SQLite. **It never leaves your
-machine** except as outbound HTTPS to the provider you chose.
+Your key is encrypted with AES-256-GCM and stored locally in SQLite.
+Source builds use `ENCRYPTION_KEY` from `.env.local`; the desktop app
+generates its own master key and protects it with the OS credential store.
+**Your API key never leaves your machine** except as outbound HTTPS to
+the provider you chose.
 
-> ⚠️ Rotating `ENCRYPTION_KEY` invalidates the stored API key — keep
-> the value backed up somewhere if you'll move the DB between machines.
+> ⚠️ In source builds, rotating `ENCRYPTION_KEY` invalidates the stored
+> API key. Desktop builds retain their generated key in the OS credential
+> store.
 
 ## Privacy
 
@@ -158,8 +161,9 @@ Atlas of Thought is built so your AI conversations stay yours:
   holds anyone's data. (The future *Publish snapshot* feature is
   opt-in per map and uploads only the static render — never the
   underlying chat data.)
-- **API keys are encrypted at rest** with AES-256-GCM. Plaintext
-  keys never leave the in-memory request that talks to the provider.
+- **API keys are encrypted at rest** with AES-256-GCM. Desktop builds
+  protect the master key with the OS credential store; plaintext keys
+  never leave the in-memory request that talks to the provider.
 - **Importers parse files locally.** Your ChatGPT export zip is read
   in-process; the only outbound use of its contents is the LLM
   cartographer call.

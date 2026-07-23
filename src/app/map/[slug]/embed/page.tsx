@@ -22,29 +22,6 @@ export default async function EmbedPage({ params }: Props) {
   const countryPlaces = places.filter((p) => p.level === "country");
   const cityPlaces = places.filter((p) => p.level === "city");
 
-  const cityConvs = await prisma.placeConversation.findMany({
-    where: { place: { mapId, level: "city" } },
-    include: {
-      conversation: {
-        include: {
-          messages: {
-            orderBy: { ordinal: "asc" },
-            take: 6,
-            select: { role: true, text: true },
-          },
-        },
-      },
-    },
-  });
-  const messagesByCity = new Map<string, { role: "user" | "assistant"; text: string }[]>();
-  for (const cc of cityConvs) {
-    const arr = messagesByCity.get(cc.placeId) ?? [];
-    for (const m of cc.conversation.messages) {
-      arr.push({ role: m.role as "user" | "assistant", text: m.text });
-    }
-    messagesByCity.set(cc.placeId, arr);
-  }
-
   const countries: CountryData[] = countryPlaces.map((c) => ({
     id: c.id,
     name: c.name,
@@ -54,20 +31,16 @@ export default async function EmbedPage({ params }: Props) {
     polygon: (c.polygon as [number, number][]) ?? [],
   }));
 
-  const cities: CityData[] = cityPlaces.map((c) => {
-    const messages = (messagesByCity.get(c.id) ?? []).slice(0, 6);
-    return {
-      id: c.id,
-      countryId: c.parentId ?? "",
-      rank: (c.cityRank ?? "town") as CityData["rank"],
-      label: c.name,
-      labelJa: c.nameJa ?? undefined,
-      position: [c.positionX, c.positionY] as Point,
-      urbanDensity: c.cityRank === "capital" ? 8 : c.cityRank === "city" ? 5 : 2,
-      summary: c.summary ?? undefined,
-      messages: messages.length > 0 ? messages : undefined,
-    };
-  });
+  const cities: CityData[] = cityPlaces.map((c) => ({
+    id: c.id,
+    countryId: c.parentId ?? "",
+    rank: (c.cityRank ?? "town") as CityData["rank"],
+    label: c.name,
+    labelJa: c.nameJa ?? undefined,
+    position: [c.positionX, c.positionY] as Point,
+    urbanDensity: c.cityRank === "capital" ? 8 : c.cityRank === "city" ? 5 : 2,
+    summary: c.summary ?? undefined,
+  }));
 
   const dbRoads = await prisma.road.findMany({ where: { mapId } });
   const roads: RoadData[] = dbRoads.map((r) => ({

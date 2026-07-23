@@ -5,6 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { getUserChatProvider } from "@/lib/api-keys";
 import { ApiKeyForm } from "./ApiKeyForm";
 
+export const dynamic = "force-dynamic";
+
 export default async function SettingsPage() {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");

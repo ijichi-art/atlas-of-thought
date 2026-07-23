@@ -5,6 +5,9 @@ import { parseContent, type KnownSource } from "@/lib/parsers";
 import type { ParseIssue } from "@/lib/parsers/types";
 import type { SourceType } from "@/generated/prisma/client";
 import { redactSecrets, type RedactionEvent } from "@/lib/secret-redact";
+import { rejectUntrustedRequest } from "@/lib/request-security";
+
+const MAX_IMPORT_BYTES = 100 * 1024 * 1024;
 
 // Map parser source strings to the DB enum values.
 const SOURCE_MAP: Record<string, SourceType> = {
@@ -37,6 +40,9 @@ async function getRawText(req: Request): Promise<{
     const source = (form.get("source") as string | null) ?? "auto";
     const title = (form.get("title") as string | null) ?? undefined;
     const file = form.get("file") as File | null;
+    if (file && file.size > MAX_IMPORT_BYTES) {
+      return { error: "Import file exceeds the 100 MB limit", status: 413 };
+    }
     const raw = file ? await file.text() : ((form.get("text") as string | null) ?? "");
     return { raw, source, mapId, title };
   }
@@ -55,6 +61,14 @@ async function getRawText(req: Request): Promise<{
 }
 
 export async function POST(req: Request) {
+  const rejection = rejectUntrustedRequest(req);
+  if (rejection) return rejection;
+
+  const declaredLength = Number(req.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_IMPORT_BYTES) {
+    return NextResponse.json({ error: "Import exceeds the 100 MB limit" }, { status: 413 });
+  }
+
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -67,6 +81,9 @@ export async function POST(req: Request) {
   }
   const { raw, source, mapId, title } = parsed;
 
+  if (Buffer.byteLength(raw, "utf8") > MAX_IMPORT_BYTES) {
+    return NextResponse.json({ error: "Import exceeds the 100 MB limit" }, { status: 413 });
+  }
   if (!mapId) {
     return NextResponse.json({ error: "mapId is required" }, { status: 400 });
   }

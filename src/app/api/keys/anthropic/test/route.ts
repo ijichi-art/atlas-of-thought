@@ -2,12 +2,16 @@ import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { auth } from "@/auth";
 import { loadAnthropicKey } from "@/lib/api-keys";
+import { rejectUntrustedRequest } from "@/lib/request-security";
 
 // Cheapest possible call: 1 token completion against Haiku.
 // This is the canonical "is the BYOK key valid" check.
 const TEST_MODEL = "claude-haiku-4-5-20251001";
 
-export async function POST() {
+export async function POST(req: Request) {
+  const rejection = rejectUntrustedRequest(req);
+  if (rejection) return rejection;
+
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

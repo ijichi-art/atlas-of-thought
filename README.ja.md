@@ -108,9 +108,13 @@ Next.js 16 (App Router) · TypeScript · Tailwind 4 · Prisma + SQLite (better-s
 | **OpenAI** | `gpt-4o-mini` | 約 $0.50 |
 | **Anthropic** | `claude-haiku-4-5` | 約 $3 |
 
-key は AES-256-GCM (`.env.local` の `ENCRYPTION_KEY` 由来) で暗号化されて SQLite にローカル保存。**マシン外に出るのは選んだプロバイダへの outbound HTTPS だけ**。
+key は AES-256-GCM で暗号化されて SQLite にローカル保存。ソース版は
+`.env.local` の `ENCRYPTION_KEY` を使い、デスクトップ版はマスターキーを
+自動生成して OS の資格情報ストアで保護する。**API key がマシン外に出るのは、
+選んだプロバイダへの outbound HTTPS だけ**。
 
-> ⚠️ `ENCRYPTION_KEY` を rotate すると保存されてる API key が読めなくなる。マシン間で DB を移動したい場合はバックアップを。
+> ⚠️ ソース版で `ENCRYPTION_KEY` を rotate すると、保存済み API key が
+> 読めなくなる。デスクトップ版の生成済み key は OS の資格情報ストアに保持される。
 
 ## プライバシー
 

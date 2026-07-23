@@ -2,9 +2,13 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { rejectUntrustedRequest } from "@/lib/request-security";
 import type { SampleMap, CityData, CountryData, RoadData, POIData, RiverData, Point } from "@/types/atlas";
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const rejection = rejectUntrustedRequest(req);
+  if (rejection) return rejection;
+
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -197,6 +201,9 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 const PatchBody = z.object({ title: z.string().min(1).max(120) });
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const rejection = rejectUntrustedRequest(req);
+  if (rejection) return rejection;
+
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id: mapId } = await params;
@@ -212,6 +219,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 }
 
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const rejection = rejectUntrustedRequest(req);
+  if (rejection) return rejection;
+
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id: mapId } = await params;

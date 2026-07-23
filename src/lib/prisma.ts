@@ -1,5 +1,6 @@
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { PrismaClient } from "@/generated/prisma/client";
+import { chmodSync, existsSync } from "node:fs";
 
 declare global {
   var __prisma: PrismaClient | undefined;
@@ -15,7 +16,11 @@ function resolveSqliteUrl(): string {
 }
 
 function makeClient(): PrismaClient {
-  const adapter = new PrismaBetterSqlite3({ url: resolveSqliteUrl() });
+  const sqlitePath = resolveSqliteUrl();
+  const adapter = new PrismaBetterSqlite3({ url: sqlitePath });
+  if (process.platform !== "win32" && existsSync(sqlitePath)) {
+    chmodSync(sqlitePath, 0o600);
+  }
   return new PrismaClient({ adapter });
 }
 

@@ -3,11 +3,12 @@ import { z } from "zod";
 import { randomBytes } from "crypto";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { rejectUntrustedRequest } from "@/lib/request-security";
 
 const ORIGIN = process.env.NEXT_PUBLIC_ORIGIN ?? "http://localhost:3002";
 
 function makeSlug(): string {
-  return randomBytes(5).toString("base64url"); // ~7 URL-safe chars
+  return randomBytes(16).toString("base64url"); // 128 bits, ~22 URL-safe chars
 }
 
 function shareUrl(slug: string): string {
@@ -16,6 +17,9 @@ function shareUrl(slug: string): string {
 
 // GET — return current share state
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const rejection = rejectUntrustedRequest(req);
+  if (rejection) return rejection;
+
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id: mapId } = await params;
@@ -39,6 +43,9 @@ const PatchBody = z.object({
 
 // PATCH — update visibility (generates slug on first share)
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const rejection = rejectUntrustedRequest(req);
+  if (rejection) return rejection;
+
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id: mapId } = await params;
@@ -54,8 +61,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   const { visibility } = parsed.data;
 
+  // Revoking sharing also revokes the URL. If the map is shared again,
+  // generate a fresh unguessable slug instead of reactivating an old link.
   // Generate slug if sharing for the first time.
-  let slug = map.shareSlug;
+  let slug = visibility === "private" ? null : map.shareSlug;
   if (!slug && visibility !== "private") {
     // Retry on the rare collision.
     for (let i = 0; i < 5; i++) {

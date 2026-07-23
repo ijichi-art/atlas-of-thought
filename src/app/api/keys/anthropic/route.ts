@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/auth";
 import { saveAnthropicKey, deleteAnthropicKey } from "@/lib/api-keys";
+import { rejectUntrustedRequest } from "@/lib/request-security";
 
 const PostBody = z.object({
   key: z.string().min(10),
@@ -9,6 +10,9 @@ const PostBody = z.object({
 });
 
 export async function POST(req: Request) {
+  const rejection = rejectUntrustedRequest(req);
+  if (rejection) return rejection;
+
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -28,7 +32,10 @@ export async function POST(req: Request) {
   return NextResponse.json({ ok: true });
 }
 
-export async function DELETE() {
+export async function DELETE(req: Request) {
+  const rejection = rejectUntrustedRequest(req);
+  if (rejection) return rejection;
+
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

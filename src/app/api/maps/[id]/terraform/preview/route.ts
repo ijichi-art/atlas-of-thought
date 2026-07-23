@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { getAiClient } from "@/lib/ai-client";
 import { terraformPreview } from "@/lib/terraform";
+import { rejectUntrustedRequest } from "@/lib/request-security";
 
 const Body = z.object({
   directive: z.string().max(2000).optional().nullable(),
@@ -14,6 +15,9 @@ const Body = z.object({
 // client follows up with POST /api/maps/[id]/terraform passing the
 // precomputed aiResult + chosen skipConvIdx[].
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const rejection = rejectUntrustedRequest(req);
+  if (rejection) return rejection;
+
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

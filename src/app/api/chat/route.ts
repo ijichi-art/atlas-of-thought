@@ -3,6 +3,7 @@ import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { getAiClient } from "@/lib/ai-client";
+import { rejectUntrustedRequest } from "@/lib/request-security";
 
 const Body = z.object({
   cityLabel: z.string().min(1).max(200),
@@ -17,6 +18,9 @@ const Body = z.object({
 });
 
 export async function POST(req: Request) {
+  const rejection = rejectUntrustedRequest(req);
+  if (rejection) return rejection;
+
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

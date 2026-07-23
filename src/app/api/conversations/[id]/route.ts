@@ -1,15 +1,19 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { rejectUntrustedRequest } from "@/lib/request-security";
 
 // Single-conversation fetch — used by the detail panel when a POI is
 // clicked so the panel shows the exact conversation that was tapped,
 // not the cluster's static sample. Returns title + ordered messages
 // (full text, not just preview snippets).
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const rejection = rejectUntrustedRequest(req);
+  if (rejection) return rejection;
+
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

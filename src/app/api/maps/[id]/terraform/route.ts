@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { getAiClient } from "@/lib/ai-client";
 import { terraform, type AiResult } from "@/lib/terraform";
+import { rejectUntrustedRequest } from "@/lib/request-security";
 
 // Body shape for the commit endpoint.
 //   - All fields are optional. With no body, behaves like the legacy
@@ -27,6 +28,9 @@ const Body = z.object({
 });
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const rejection = rejectUntrustedRequest(req);
+  if (rejection) return rejection;
+
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

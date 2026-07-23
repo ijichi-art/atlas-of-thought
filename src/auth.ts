@@ -19,6 +19,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
+import { rejectUntrustedRequest } from "@/lib/request-security";
 
 const SOLO_USER_ID = "solo-user";
 const FAR_FUTURE = "2099-01-01T00:00:00Z";
@@ -102,9 +103,15 @@ export async function signOut(_options?: unknown): Promise<void> {
   // intentional no-op
 }
 
+function soloModeAuthResponse(request: Request) {
+  const rejection = rejectUntrustedRequest(request);
+  if (rejection) return rejection;
+  return NextResponse.json({ mode: "solo" }, { status: 404 });
+}
+
 // Catch-all /api/auth/* responder. Returns 404 so it's obvious the
 // endpoint is inert in solo mode.
 export const handlers = {
-  GET: () => NextResponse.json({ mode: "solo" }, { status: 404 }),
-  POST: () => NextResponse.json({ mode: "solo" }, { status: 404 }),
+  GET: soloModeAuthResponse,
+  POST: soloModeAuthResponse,
 };

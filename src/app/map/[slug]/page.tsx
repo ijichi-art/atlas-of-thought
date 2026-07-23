@@ -22,27 +22,6 @@ async function loadMap(slug: string) {
   const countryPlaces = places.filter((p) => p.level === "country");
   const cityPlaces = places.filter((p) => p.level === "city");
 
-  const cityConvs = await prisma.placeConversation.findMany({
-    where: { place: { mapId, level: "city" } },
-    include: {
-      conversation: {
-        include: {
-          messages: {
-            orderBy: { ordinal: "asc" },
-            take: 6,
-            select: { role: true, text: true },
-          },
-        },
-      },
-    },
-  });
-  const messagesByCity = new Map<string, { role: string; text: string }[]>();
-  for (const cc of cityConvs) {
-    const arr = messagesByCity.get(cc.placeId) ?? [];
-    for (const m of cc.conversation.messages) arr.push({ role: m.role, text: m.text });
-    messagesByCity.set(cc.placeId, arr);
-  }
-
   const dbRoads = await prisma.road.findMany({ where: { mapId } });
 
   return {
@@ -51,7 +30,6 @@ async function loadMap(slug: string) {
     shareSlug: map.shareSlug,
     countryPlaces,
     cityPlaces,
-    messagesByCity,
     dbRoads,
     cityCount: cityPlaces.length,
     countryCount: countryPlaces.length,
@@ -98,22 +76,16 @@ export default async function PublicMapPage({ params }: Props) {
     polygon: (c.polygon as [number, number][]) ?? [],
   }));
 
-  const cities: CityData[] = map.cityPlaces.map((c) => {
-    const messages = (map.messagesByCity.get(c.id) ?? [])
-      .map((m) => ({ role: m.role as "user" | "assistant", text: m.text }))
-      .slice(0, 6);
-    return {
-      id: c.id,
-      countryId: c.parentId ?? "",
-      rank: (c.cityRank ?? "town") as CityData["rank"],
-      label: c.name,
-      labelJa: c.nameJa ?? undefined,
-      position: [c.positionX, c.positionY] as Point,
-      urbanDensity: c.cityRank === "capital" ? 8 : c.cityRank === "city" ? 5 : 2,
-      summary: c.summary ?? undefined,
-      messages: messages.length > 0 ? messages : undefined,
-    };
-  });
+  const cities: CityData[] = map.cityPlaces.map((c) => ({
+    id: c.id,
+    countryId: c.parentId ?? "",
+    rank: (c.cityRank ?? "town") as CityData["rank"],
+    label: c.name,
+    labelJa: c.nameJa ?? undefined,
+    position: [c.positionX, c.positionY] as Point,
+    urbanDensity: c.cityRank === "capital" ? 8 : c.cityRank === "city" ? 5 : 2,
+    summary: c.summary ?? undefined,
+  }));
 
   const roads: RoadData[] = map.dbRoads.map((r) => ({
     id: r.id,

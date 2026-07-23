@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { ImportForm } from "./ImportForm";
 
 export const metadata = { title: "Import — Atlas of Thought" };
+export const dynamic = "force-dynamic";
 
 export default async function ImportPage() {
   const session = await auth();
