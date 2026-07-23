@@ -64,7 +64,9 @@ npx prisma db push
 npm run dev
 ```
 
-<http://localhost:3002> を開く → Settings に LLM API key 貼る (DeepSeek なら 1500 会話地図 1 回で約 $0.30、OpenAI 約 $3、Anthropic $5〜$15) → Import → Terraform。
+開発サーバーが起動したら、ターミナルに表示された URL を開く。Settings に
+LLM API key を貼る (DeepSeek なら 1500 会話地図 1 回で約 $0.30、OpenAI
+約 $3、Anthropic $5〜$15) → Import → Terraform。
 
 地図は `prisma/dev.db` に保存される。
 

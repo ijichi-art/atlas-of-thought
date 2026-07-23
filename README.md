@@ -78,9 +78,10 @@ npx prisma db push
 npm run dev
 ```
 
-Open <http://localhost:3002> → Settings → paste your LLM API key (DeepSeek
-$0.30 per 1500-conversation map, OpenAI ~$3, Anthropic ~$5–15 depending
-on model) → Import → Terraform.
+Once the development server is ready, open the URL shown in your terminal.
+Then go to Settings, paste your LLM API key (DeepSeek $0.30 per
+1500-conversation map, OpenAI ~$3, Anthropic ~$5–15 depending on model),
+open Import, and click Terraform.
 
 That's it. The map lives in `prisma/dev.db` on your machine.
 
