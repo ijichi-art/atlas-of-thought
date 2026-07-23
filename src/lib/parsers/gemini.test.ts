@@ -92,6 +92,17 @@ describe("parseGeminiHtml", () => {
     );
   });
 
+  it("decodes each entity only once", () => {
+    const html = MINIMAL_FIXTURE.replace(
+      "Write a haiku about a cat.",
+      "Explain &amp;lt;script&amp;gt; safely.",
+    );
+    const out = parseGeminiHtml(html);
+    expect(out.conversations[0].messages[0].text).toBe(
+      "Explain &lt;script&gt; safely.",
+    );
+  });
+
   it("captures an assistant response when a second body cell is present", () => {
     const withResponse = `<!DOCTYPE html>
 <div class="outer-cell">

@@ -166,7 +166,7 @@ export function ImportForm({ maps }: { maps: MapMeta[] }) {
         )}
         <div className="flex gap-3 pt-2">
           <a
-            href={`/atlas/${mapId}`}
+            href={`/atlas/${encodeURIComponent(mapId)}`}
             className="px-4 py-2 bg-stone-800 text-stone-50 text-sm rounded hover:bg-stone-700"
           >
             View atlas →

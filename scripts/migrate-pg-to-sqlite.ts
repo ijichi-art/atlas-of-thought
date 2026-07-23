@@ -123,7 +123,6 @@ async function main() {
       }
     });
     insertMany(pgRows);
-    console.log(`  ${table}: ${pgRows.length} rows`);
   }
 
   // ── ApiKey ──────────────────────────────────────────────────────────

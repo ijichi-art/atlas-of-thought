@@ -40,32 +40,87 @@ const DATE_EN = /\b([A-Z][a-z]{2})\s+(\d{1,2}),\s+(\d{4})[,\s]+(\d{1,2}):(\d{2})
 const DATE_JA = /(\d{4})年(\d{1,2})月(\d{1,2})日\s+(\d{1,2}):(\d{2}):(\d{2})/;
 
 function decodeEntities(s: string): string {
-  return s
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&apos;/g, "'")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&#(\d+);/g, (_, n: string) => String.fromCharCode(parseInt(n, 10)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, n: string) => String.fromCharCode(parseInt(n, 16)));
+  const named: Record<string, string> = {
+    amp: "&",
+    lt: "<",
+    gt: ">",
+    quot: '"',
+    apos: "'",
+    nbsp: " ",
+  };
+  return s.replace(
+    /&(?:amp|lt|gt|quot|apos|nbsp|#39|#\d+|#x[0-9a-f]+);/gi,
+    (entity) => {
+      const body = entity.slice(1, -1).toLowerCase();
+      if (body in named) return named[body];
+      const codePoint =
+        body === "#39"
+          ? 39
+          : parseInt(body.slice(body[1] === "x" ? 2 : 1), body[1] === "x" ? 16 : 10);
+      return Number.isSafeInteger(codePoint) && codePoint >= 0 && codePoint <= 0x10ffff
+        ? String.fromCodePoint(codePoint)
+        : entity;
+    },
+  );
 }
 
-// Strip HTML tags but preserve <br> as newlines so multi-line prompts
-// survive. Drop <a> contents that are just "Open in Gemini" affordances.
+function findTagEnd(html: string, start: number): number {
+  let quote = "";
+  for (let i = start + 1; i < html.length; i++) {
+    const char = html[i];
+    if (quote) {
+      if (char === quote) quote = "";
+    } else if (char === '"' || char === "'") {
+      quote = char;
+    } else if (char === ">") {
+      return i;
+    }
+  }
+  return -1;
+}
+
+// Convert Takeout's machine-generated HTML fragment into plain text without
+// treating a sequence of regex replacements as an HTML sanitizer.
 function htmlToText(html: string): string {
-  return decodeEntities(
-    html
-      // <a href="...gemini.google.com...">Open in Gemini</a> → drop entirely
-      .replace(/<a [^>]*?gemini\.google\.com[^>]*?>[\s\S]*?<\/a>/gi, "")
-      // newline preservation
-      .replace(/<br\s*\/?>/gi, "\n")
-      .replace(/<\/p>/gi, "\n")
-      .replace(/<\/div>/gi, "\n")
-      // strip remaining tags
-      .replace(/<[^>]+>/g, ""),
-  )
+  let text = "";
+  let cursor = 0;
+  let skipGeminiLink = false;
+
+  while (cursor < html.length) {
+    const tagStart = html.indexOf("<", cursor);
+    if (tagStart === -1) {
+      if (!skipGeminiLink) text += html.slice(cursor);
+      break;
+    }
+    if (!skipGeminiLink) text += html.slice(cursor, tagStart);
+
+    const tagEnd = findTagEnd(html, tagStart);
+    if (tagEnd === -1) {
+      if (!skipGeminiLink) text += html.slice(tagStart);
+      break;
+    }
+
+    const tag = html.slice(tagStart, tagEnd + 1);
+    const tagName = /^<\s*\/?\s*([a-z0-9-]+)/i.exec(tag)?.[1]?.toLowerCase();
+    const isClosing = /^<\s*\//.test(tag);
+
+    if (tagName === "a") {
+      if (!isClosing && /gemini\.google\.com/i.test(tag)) {
+        skipGeminiLink = true;
+      } else if (isClosing) {
+        skipGeminiLink = false;
+      }
+    } else if (
+      !skipGeminiLink &&
+      (tagName === "br" || (isClosing && (tagName === "p" || tagName === "div")))
+    ) {
+      text += "\n";
+    }
+
+    cursor = tagEnd + 1;
+  }
+
+  return decodeEntities(text)
     .replace(/[ \t]+/g, " ")
     .replace(/\n[ \t]+/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
