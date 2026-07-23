@@ -28,7 +28,7 @@
     "@anthropic-ai/sdk": "^0.91.1",
     "@prisma/adapter-better-sqlite3": "^7.9.0",
     "@prisma/client": "^7.9.0",
-    "better-sqlite3": "^12.9.0",
+    "better-sqlite3": "^13.0.1",
     "d3": "^7.9.0",
     "d3-force": "^3.0.0",
     "d3-zoom": "^3.0.0",
